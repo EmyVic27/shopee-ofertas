@@ -1,5 +1,6 @@
 import hashlib  
 import time  
+import random  
 import json  
 import re  
 import os  
@@ -18,6 +19,31 @@ st.set_page_config(
 
 API_URL = "https://open-api.affiliate.shopee.com.br/graphql"  
 HISTORICO_FILE = "historico_ofertas.json"  
+
+# ============== POOL DIVERSICADO DE SEGURANÇA (SEM NOME DE PRODUTO) ==============  
+
+POOL_FALLBACK_FRASES = [  
+    "Amiga, corre que o cupom do 8.8 tá voando da tela! 🏃‍♀️💨",  
+    "Gente, socorro, achei um achadinho bom demais pra deixar passar! 😱",  
+    "Óoo lindeza, e olha o valor disso com desconto! 😍",  
+    "Para tudo, essa promoção relâmpago vai esgotar rápido! ⚡",  
+    "Amiga, isso tá quase de graça hoje, olha só! 🤑",  
+    "Separei isso especialmente pra você aproveitar o cupom! 💛",  
+    "Corre, corre, que isso não vai durar nem 5 minutos! 🏃‍♀️💨",  
+    "Achei e já vim correndo te contar antes que subam o preço! 😍",  
+    "Amiga, larga tudo e aproveita esse achadinho de hoje! 👀",  
+    "Gente, preço bom desse jeito no 8.8 não dura nada! ⏳",  
+    "Amiga, essa dica é de ouro pra quem ama economizar! ✨",  
+    "Aqui é chance rara, pega seu cupom e garante já! 🍀",  
+    "Amiga, você não tem noção do tanto que vale a pena! 🎁",  
+    "Gente, esse preço com cupom ficou um absurdo de barato! 💣",  
+    "Amiga, essa dica vale cada segundo, aproveita antes que esgoste! 💕",  
+    "Isso aqui tá voando da prateleira, pega o seu rápido! 🛒",  
+    "Amiga, hoje é dia de sorte com esse descontaço! 🌟",  
+    "Gente, eu juro que fiquei de boca aberta com esse valor! 😮",  
+    "Amiga, pega o cupom que fica ainda mais barato, corre! 🎟️",  
+    "Isso aqui é hit garantido, separado com todo carinho! 🌸"  
+]  
 
 # ============== FUNÇÕES DE API E AUXILIARES ==============  
 
@@ -184,23 +210,34 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
     return filtradas  
 
 def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:  
-    nome_produto = oferta.get("productName", "")  
     preco = oferta.get("price") or oferta.get("priceMin") or ""  
     desconto = oferta.get("priceDiscountRate", "")  
 
+    angulos = [  
+        "Tom de amiga íntima compartilhando um achadinho no evento 8.8",  
+        "Urgência e velocidade com cupons relâmpago esgotando",  
+        "Empolgação com utilidade prática para lembrancinha/festa ou casa",  
+        "Surpresa com o preço extremamente baixo e oportunidade única",  
+        "Recomendação direta e carinhosa de quem ama economizar"  
+    ]  
+    angulo_escolhido = random.choice(angulos)  
+
     prompt = f"""  
-    Você cria frases curtas de divulgação de ofertas no tom "{estilo_prompt}".  
-    Escreva UMA ÚNICA frase chamativa e espontânea recomendando este produto específico:  
+    Você é a Carla Barce (influencer de festas, casa e achadinhos de ofertas no WhatsApp).  
+    Crie UMA ÚNICA FRASE CURTA, IMPERDÍVEL E MUITO NATURAL para mandar no seu grupo durante a campanha de cupons 8.8 da Shopee.  
 
-    Produto: {nome_produto}  
-    Preço: R$ {preco}  
-    Desconto: {desconto}%  
+    Dados da promoção:  
+    - Preço: R$ {preco}  
+    - Desconto: {desconto}%  
+    - Tom principal: {estilo_prompt} ({angulo_escolhido})  
 
-    Regras de geração:  
-    1. A frase deve obrigatoriamente fazer referência direta ao produto ({nome_produto}) ou ao seu uso real.  
-    2. Use 1 ou 2 emojis variados e adequados.  
-    3. Nunca repita o mesmo padrão de palavras.  
-    4. Responda APENAS com a frase final, sem aspas, explicações ou saudações.  
+    REGRAS ESTRITAS E OBRIGATÓRIAS:  
+    1. JAMAIS mencione o nome do produto. NUNCA coloque o nome do item no texto.  
+    2. JAMAIS comece com "Gente, olha essa oferta" ou "Gente, olha só". Alterne completamente o início da frase.  
+    3. Foque em: urgência, cupons 8.8, achadinho que vale a pena, economia real ou carinho com as seguidoras.  
+    4. Use de 1 a 2 emojis alegres e adequados.  
+    5. Mantenha o texto CURTO (no máximo 10 a 14 palavras) para leitura instantânea.  
+    6. Responda APENAS com a frase final, sem aspas, sem explicações e sem introduções.  
     """  
 
     modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]  
@@ -212,14 +249,13 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:
                 contents=prompt  
             )  
             if response and response.text:  
-                res = response.text.strip().replace("\n", " ")  
-                if len(res) > 5:  
+                res = response.text.strip().replace("\n", " ").replace('"', '')  
+                if len(res) > 5 and not res.lower().startswith("gente, olha"):  
                     return res  
         except Exception:  
             continue  
 
-    # Fallback dinâmico com o nome do produto caso haja instabilidade temporária na API  
-    return f"Gente, olha essa oferta imperdível de {nome_produto[:35]}... com {desconto}% OFF! 😱"  
+    return random.choice(POOL_FALLBACK_FRASES)  
 
 # ============== INTERFACE STREAMLIT ==============  
 
@@ -233,21 +269,30 @@ app_secret = st.sidebar.text_input("Shopee APP_SECRET", value="BLFN3YKFSMCSHSKY6
 gemini_key = st.sidebar.text_input("Gemini API Key", value="AQ.Ab8RN6JpRbEOoJTrl2mHywFNLg4-Hp8fJSrfBOJXFNoxj0C-sw", type="password")  
 
 st.sidebar.markdown("---")  
-st.sidebar.header("⚙️ Configurações da Busca")  
+st.sidebar.header("⚙️ Modo de Pesquisa")  
 
-keywords_input = st.sidebar.text_input(  
-    "Palavras-chave (separadas por vírgula):",  
-    value="lembrancinha, festa infantil, cozinha, casa, moda feminina, eletrodomesticos",  
-    help="No celular, basta digitar as palavras separadas por vírgula e tocar fora da caixa."  
-)  
+usar_keywords = st.sidebar.checkbox("Usar Palavras-Chave Específicas", value=True)  
+
+if usar_keywords:  
+    keywords_input = st.sidebar.text_input(  
+        "Palavras-chave (separadas por vírgula):",  
+        value="lembrancinha, festa infantil, cozinha, casa, moda feminina, eletrodomesticos",  
+        help="Digite os termos desejados. Se desmarcar a caixa acima, a pesquisa trará os melhores achados gerais de qualquer categoria."  
+    )  
+else:  
+    keywords_input = ""  
+    st.sidebar.info("🔍 **Modo Busca Livre**: Pesquisando os melhores achados gerais da Shopee sem restringir por palavra-chave (usando apenas os filtros de preço, loja e desconto abaixo).")  
 
 qtd_por_keyword = st.sidebar.number_input(  
-    "Quantidade de Ofertas por Palavra-chave:",  
+    "Quantidade de Ofertas por Busca:",  
     min_value=5,  
     max_value=200,  
     value=30,  
     step=5  
 )  
+
+st.sidebar.markdown("---")  
+st.sidebar.header("🏬 Filtros de Loja e Vendas")  
 
 tipos_loja = st.sidebar.multiselect(  
     "Tipos de Loja na Shopee:",  
@@ -275,7 +320,6 @@ min_desconto = st.sidebar.slider("Desconto Mínimo (%)", 5, 90, 20) if filtrar_d
 filtrar_comissao = st.sidebar.checkbox("Filtrar por Comissão Mínima", value=False)  
 min_comissao = st.sidebar.slider("Comissão Mínima (%)", 1.0, 30.0, 8.0) if filtrar_comissao else 0  
 
-buscar_gerais = st.sidebar.checkbox("Incluir Ofertas Gerais (Sem termo específico)", value=True)  
 usar_historico = st.sidebar.checkbox("Ignorar Produtos/Links Já Divulgados (Histórico)", value=True)  
 
 st.sidebar.markdown("---")  
@@ -283,10 +327,10 @@ st.sidebar.header("✍️ Tom e Estilo do Gemini")
 estilo_prompt = st.sidebar.selectbox(  
     "Estilo da Frase:",  
     [  
-        "Amiga / Achadinhos (Descontraído e íntimo)",  
-        "Urgência / Promoção Relâmpago (Oportunidade única)",  
-        "Festa Infantil & Maternidade (Carinhoso e prático)",  
-        "Direto e Objetivo (Foco no preço e economia)"  
+        "Amiga / Achadinhos (Especial Cupons 8.8)",  
+        "Urgência / Promoção Relâmpago (Poucas unidades)",  
+        "Festa Infantil & Maternidade (Dica de amiga)",  
+        "Oportunidade Imperdível (Foco em economizar)"  
     ]  
 )  
 
@@ -302,10 +346,10 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         gemini_client = genai.Client(api_key=gemini_key)  
         historico = carregar_historico()  
         
-        keywords_list = [k.strip() for k in re.split(r"[,\n]", keywords_input) if k.strip()]  
-        buscas = list(keywords_list)  
-        if buscar_gerais:  
-            buscas.append(None)  
+        if usar_keywords and keywords_input.strip():  
+            buscas = [k.strip() for k in re.split(r"[,\n]", keywords_input) if k.strip()]  
+        else:  
+            buscas = [None] # None = busca geral livre sem palavra-chave  
         
         progresso = st.progress(0)  
         status_text = st.empty()  
@@ -314,7 +358,7 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         total_buscas = len(buscas)  
         
         for index, kw in enumerate(buscas):  
-            rotulo = "Ofertas Gerais" if kw is None else kw  
+            rotulo = "Busca Livre (Todas as Categorias)" if kw is None else kw  
             status_text.text(f"Buscando {qtd_por_keyword} ofertas para: {rotulo}...")  
             
             ofertas = buscar_todas_ofertas(app_id, app_secret, kw, qtd_por_keyword)  
