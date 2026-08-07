@@ -281,7 +281,7 @@ if usar_keywords:
     )  
 else:  
     keywords_input = ""  
-    st.sidebar.info("🔍 **Modo Busca Livre**: Pesquisando os melhores achados gerais da Shopee sem restringir por palavra-chave (usando apenas os filtros de preço, loja e desconto abaixo).")  
+    st.sidebar.info("🔍 **Modo Busca Livre**: Pesquisando os melhores achados gerais da Shopee sem restringir por palavra-chave (usando termos gerais e filtros abaixo).")  
 
 qtd_por_keyword = st.sidebar.number_input(  
     "Quantidade de Ofertas por Busca:",  
@@ -349,7 +349,8 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         if usar_keywords and keywords_input.strip():  
             buscas = [k.strip() for k in re.split(r"[,\n]", keywords_input) if k.strip()]  
         else:  
-            buscas = [None] # None = busca geral livre sem palavra-chave  
+            # TERMOS AMPLOS DE BUSCA GERAL PARA TRAZER OS MELHORES ACHADOS DE QUALQUER CATEGORIA  
+            buscas = ["promoção", "desconto", "oferta", "achadinhos", "utilidades", "presente"]  
         
         progresso = st.progress(0)  
         status_text = st.empty()  
@@ -358,7 +359,7 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         total_buscas = len(buscas)  
         
         for index, kw in enumerate(buscas):  
-            rotulo = "Busca Livre (Todas as Categorias)" if kw is None else kw  
+            rotulo = f"Busca Geral ('{kw}')" if not usar_keywords or not keywords_input.strip() else kw  
             status_text.text(f"Buscando {qtd_por_keyword} ofertas para: {rotulo}...")  
             
             ofertas = buscar_todas_ofertas(app_id, app_secret, kw, qtd_por_keyword)  
