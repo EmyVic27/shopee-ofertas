@@ -225,13 +225,13 @@ gemini_key = st.sidebar.text_input("Gemini API Key", value="AQ.Ab8RN6JpRbEOoJTrl
 st.sidebar.markdown("---")  
 st.sidebar.header("⚙️ Configurações da Busca")  
 
-keywords_input = st.sidebar.text_area(  
-    "Palavras-chave (uma por linha ou separadas por vírgula):",  
+# OTIMIZAÇÃO PARA CELULAR: st.text_input não exige Ctrl+Enter no smartphone  
+keywords_input = st.sidebar.text_input(  
+    "Palavras-chave (separadas por vírgula):",  
     value="lembrancinha, festa infantil, cozinha, casa, moda feminina, eletrodomesticos",  
-    height=100  
+    help="No celular, basta digitar as palavras separadas por vírgula e tocar fora da caixa."  
 )  
 
-# NOVO PARAMETRO: Quantidade de ofertas por palavra-chave  
 qtd_por_keyword = st.sidebar.number_input(  
     "Quantidade de Ofertas por Palavra-chave:",  
     min_value=5,  
@@ -371,10 +371,8 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
 if st.session_state.resultados:  
     st.subheader(f"📋 Ofertas Encontradas ({len(st.session_state.resultados)})")  
     
-    # Seleção rápida  
     selecionados = [item for item in st.session_state.resultados if item["selecionado"]]  
     
-    # Bloco para envio do LOTE COMPLETO de selecionadas  
     if selecionados:  
         texto_bloco_total = "\n\n---\n\n".join([r["texto_final"] for r in selecionados])  
         texto_bloco_encoded = urllib.parse.quote(texto_bloco_total)  
