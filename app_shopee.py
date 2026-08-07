@@ -189,27 +189,37 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:
     desconto = oferta.get("priceDiscountRate", "")  
 
     prompt = f"""  
-    Você cria mensagens promocionais para grupos de ofertas no WhatsApp.  
-    Estilo desejado: {estilo_prompt}  
-    
+    Você cria frases curtas de divulgação de ofertas no tom "{estilo_prompt}".  
+    Escreva UMA ÚNICA frase chamativa e espontânea recomendando este produto específico:  
+
     Produto: {nome_produto}  
     Preço: R$ {preco}  
     Desconto: {desconto}%  
 
-    Diretrizes estritas:  
-    1. Crie UMA ÚNICA frase curta, chamativa e natural recomendando o produto.  
-    2. Relacione a frase especificamente à utilidade ou benefício do produto.  
-    3. Use 1 a 2 emojis adequados.  
+    Regras de geração:  
+    1. A frase deve obrigatoriamente fazer referência direta ao produto ({nome_produto}) ou ao seu uso real.  
+    2. Use 1 ou 2 emojis variados e adequados.  
+    3. Nunca repita o mesmo padrão de palavras.  
     4. Responda APENAS com a frase final, sem aspas, explicações ou saudações.  
     """  
-    try:  
-        response = gemini_client.models.generate_content(  
-            model="gemini-2.5-flash",  
-            contents=prompt  
-        )  
-        return response.text.strip().replace("\n", " ")  
-    except Exception as e:  
-        return "Caramba, amiga, olha esse achado incrível! 😱"  
+
+    modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]  
+    
+    for mod in modelos:  
+        try:  
+            response = gemini_client.models.generate_content(  
+                model=mod,  
+                contents=prompt  
+            )  
+            if response and response.text:  
+                res = response.text.strip().replace("\n", " ")  
+                if len(res) > 5:  
+                    return res  
+        except Exception:  
+            continue  
+
+    # Fallback dinâmico com o nome do produto caso haja instabilidade temporária na API  
+    return f"Gente, olha essa oferta imperdível de {nome_produto[:35]}... com {desconto}% OFF! 😱"  
 
 # ============== INTERFACE STREAMLIT ==============  
 
@@ -225,7 +235,6 @@ gemini_key = st.sidebar.text_input("Gemini API Key", value="AQ.Ab8RN6JpRbEOoJTrl
 st.sidebar.markdown("---")  
 st.sidebar.header("⚙️ Configurações da Busca")  
 
-# OTIMIZAÇÃO PARA CELULAR: st.text_input não exige Ctrl+Enter no smartphone  
 keywords_input = st.sidebar.text_input(  
     "Palavras-chave (separadas por vírgula):",  
     value="lembrancinha, festa infantil, cozinha, casa, moda feminina, eletrodomesticos",  
