@@ -154,6 +154,9 @@ def salvar_historico(historico: dict):
     with open(HISTORICO_FILE, "w", encoding="utf-8") as f:  
         json.dump(historico, f, ensure_ascii=False, indent=2)  
 
+def limpar_historico_arquivo():  
+    salvar_historico({"links": [], "produtos": [], "frases": []})  
+
 def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,  
                     tipos_loja_selecionados: list, min_vendas: int,  
                     filtrar_comissao: bool, min_comissao: float,  
@@ -164,6 +167,11 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
     produtos_nesta_rodada = set()  
     
     filtradas = []  
+    descartes_historico = 0  
+    descartes_preco = 0  
+    descartes_loja = 0  
+    descartes_desconto = 0  
+    
     for oferta in ofertas:  
         comissao = float(oferta.get("commissionRate") or 0) * 100  
         desconto = float(oferta.get("priceDiscountRate") or 0)  
@@ -174,7 +182,7 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
         loja_tipos = obter_tipos_loja(oferta)  
         
         passou_loja = False  
-        if "Todas as Lojas" in tipos_loja_selecionados:  
+        if not tipos_loja_selecionados or "Todas as Lojas" in tipos_loja_selecionados:  
             passou_loja = True  
         else:  
             if "Lojas Oficiais (Shopee Oficial)" in tipos_loja_selecionados and 1 in loja_tipos:  
@@ -183,31 +191,39 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
                 passou_loja = True  
         
         if not passou_loja:  
+            descartes_loja += 1  
             continue  
             
         if vendas < min_vendas:  
             continue  
             
-        if min_preco > 0 and preco < min_preco:  
-            continue  
-        if max_preco > 0 and preco > max_preco:  
+        if (min_preco > 0 and preco < min_preco) or (max_preco > 0 and preco > max_preco):  
+            descartes_preco += 1  
             continue  
             
         if filtrar_comissao and comissao < min_comissao:  
             continue  
         if filtrar_desconto and desconto < min_desconto:  
+            descartes_desconto += 1  
             continue  
             
-        if link in links_usados:  
-            continue  
-        if produto_key and (produto_key in produtos_usados or produto_key in produtos_nesta_rodada):  
-            continue  
+        if usar_historico:  
+            if link in links_usados or (produto_key and (produto_key in produtos_usados or produto_key in produtos_nesta_rodada)):  
+                descartes_historico += 1  
+                continue  
         
         produtos_nesta_rodada.add(produto_key)  
         filtradas.append(oferta)  
         
     filtradas.sort(key=lambda o: float(o.get("priceDiscountRate") or 0), reverse=True)  
-    return filtradas  
+    stats = {  
+        "total_bruto": len(ofertas),  
+        "passaram": len(filtradas),  
+        "descartes_historico": descartes_historico,  
+        "descartes_preco": descartes_preco,  
+        "descartes_loja": descartes_loja  
+    }  
+    return filtradas, stats  
 
 def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:  
     preco = oferta.get("price") or oferta.get("priceMin") or ""  
@@ -281,7 +297,7 @@ if usar_keywords:
     )  
 else:  
     keywords_input = ""  
-    st.sidebar.info("🔍 **Modo Busca Livre**: Pesquisando os melhores achados gerais da Shopee sem restringir por palavra-chave (usando termos gerais e filtros abaixo).")  
+    st.sidebar.info("🔍 **Modo Busca Livre**: Pesquisando os melhores achados gerais da Shopee sem restringir por palavra-chave.")  
 
 qtd_por_keyword = st.sidebar.number_input(  
     "Quantidade de Ofertas por Busca:",  
@@ -301,7 +317,7 @@ tipos_loja = st.sidebar.multiselect(
         "Lojas Indicadas (Shopee Indicado)",  
         "Todas as Lojas"  
     ],  
-    default=["Lojas Oficiais (Shopee Oficial)", "Lojas Indicadas (Shopee Indicado)"]  
+    default=["Todas as Lojas"]  
 )  
 
 min_vendas = st.sidebar.number_input("Vendas Mínimas do Produto", value=0, step=5)  
@@ -310,17 +326,22 @@ col_p1, col_p2 = st.sidebar.columns(2)
 with col_p1:  
     min_price = st.number_input("Preço Mínimo (R$)", value=0.0, step=5.0)  
 with col_p2:  
-    max_price = st.number_input("Preço Máximo (R$ 0 = sem limite)", value=250.0, step=10.0)  
+    max_price = st.number_input("Preço Máximo (R$ 0 = sem limite)", value=0.0, step=10.0)  
 
 st.sidebar.markdown("---")  
-st.sidebar.header("🎯 Filtros de Desconto e Comissão")  
+st.sidebar.header("🎯 Histórico e Filtros")  
+
+usar_historico = st.sidebar.checkbox("Ignorar Ofertas Já Buscadas Antes (Histórico)", value=False)  
+
+if st.sidebar.button("🧹 Limpar Histórico do Servidor"):  
+    limpar_historico_arquivo()  
+    st.sidebar.success("Histórico zerado com sucesso!")  
+
 filtrar_desconto = st.sidebar.checkbox("Filtrar por Desconto Mínimo", value=False)  
 min_desconto = st.sidebar.slider("Desconto Mínimo (%)", 5, 90, 20) if filtrar_desconto else 0  
 
 filtrar_comissao = st.sidebar.checkbox("Filtrar por Comissão Mínima", value=False)  
 min_comissao = st.sidebar.slider("Comissão Mínima (%)", 1.0, 30.0, 8.0) if filtrar_comissao else 0  
-
-usar_historico = st.sidebar.checkbox("Ignorar Produtos/Links Já Divulgados (Histórico)", value=True)  
 
 st.sidebar.markdown("---")  
 st.sidebar.header("✍️ Tom e Estilo do Gemini")  
@@ -349,7 +370,6 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         if usar_keywords and keywords_input.strip():  
             buscas = [k.strip() for k in re.split(r"[,\n]", keywords_input) if k.strip()]  
         else:  
-            # TERMOS AMPLOS DE BUSCA GERAL PARA TRAZER OS MELHORES ACHADOS DE QUALQUER CATEGORIA  
             buscas = ["promoção", "desconto", "oferta", "achadinhos", "utilidades", "presente"]  
         
         progresso = st.progress(0)  
@@ -357,13 +377,15 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         
         todas_ofertas_filtradas = []  
         total_buscas = len(buscas)  
+        total_bruto_acumulado = 0  
+        total_descarte_hist = 0  
         
         for index, kw in enumerate(buscas):  
             rotulo = f"Busca Geral ('{kw}')" if not usar_keywords or not keywords_input.strip() else kw  
             status_text.text(f"Buscando {qtd_por_keyword} ofertas para: {rotulo}...")  
             
             ofertas = buscar_todas_ofertas(app_id, app_secret, kw, qtd_por_keyword)  
-            boas = filtrar_ofertas(  
+            boas, stats = filtrar_ofertas(  
                 ofertas, historico, usar_historico,  
                 tipos_loja, min_vendas,  
                 filtrar_comissao, min_comissao,  
@@ -371,8 +393,13 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
                 min_price, max_price  
             )  
             todas_ofertas_filtradas.extend(boas)  
+            total_bruto_acumulado += stats["total_bruto"]  
+            total_descarte_hist += stats["descartes_historico"]  
             progresso.progress((index + 1) / total_buscas)  
         
+        if total_descarte_hist > 0 and len(todas_ofertas_filtradas) < 10:  
+            st.info(f"💡 **Diagnóstico de Histórico**: Foram encontradas {total_bruto_acumulado} ofertas brutas na Shopee, mas {total_descarte_hist} delas já tinham sido buscadas em testes anteriores e foram ignoradas pelo Histórico. Se quiser ver todas novamente, desmarque a opção 'Ignorar Ofertas Já Buscadas Antes' na barra lateral ou clique em 'Limpar Histórico'.")  
+            
         status_text.text("Gerando frases personalizadas com o Gemini AI...")  
         
         resultados_gerados = []  
@@ -432,7 +459,7 @@ if st.session_state.resultados:
         texto_bloco_encoded = urllib.parse.quote(texto_bloco_total)  
         whatsapp_lote_url = f"https://api.whatsapp.com/send?text={texto_bloco_encoded}"  
         
-        st.markdown("### 📲 Opção 1: Enviar TODAS as Selecionadas de uma vez só")  
+        st.markdown("### 📲 Opção 1: Enviar TODAS as Selecionadas em Bloco (Mensagem Única)")  
         st.link_button(  
             f"🚀 Encaminhar {len(selecionados)} Ofertas Selecionadas no WhatsApp em Mensagem Única",  
             whatsapp_lote_url,  
