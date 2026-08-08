@@ -210,13 +210,14 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
         vendas = int(oferta.get("sales") or 0)  
         loja_tipos = obter_tipos_loja(oferta)  
         
+        # Correção no filtro de tipo de loja para aceitar variações do rótulo  
         passou_loja = False  
-        if not tipos_loja_selecionados or "Todas as Lojas" in tipos_loja_selecionados:  
+        if not tipos_loja_selecionados or any("Todas" in str(t) for t in tipos_loja_selecionados):  
             passou_loja = True  
         else:  
-            if "Lojas Oficiais (Shopee Oficial)" in tipos_loja_selecionados and 1 in loja_tipos:  
+            if any("Oficiais" in str(t) for t in tipos_loja_selecionados) and 1 in loja_tipos:  
                 passou_loja = True  
-            if "Lojas Indicadas (Shopee Indicado)" in tipos_loja_selecionados and 2 in loja_tipos:  
+            if any("Indicadas" in str(t) for t in tipos_loja_selecionados) and 2 in loja_tipos:  
                 passou_loja = True  
         
         if not passou_loja:  
@@ -431,7 +432,6 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         
         buscas = []  
         
-        # Monta lista de termos de acordo com o modo escolhido  
         if modo_busca in ["🏷️ Usar Categorias da Shopee", "🔀 Combinar Categorias + Palavras-Chave"]:  
             for cat in categorias_selecionadas:  
                 buscas.extend(CATEGORIAS_MAP.get(cat, []))  
@@ -444,7 +444,6 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         if modo_busca == "🌐 Busca Livre Geral (Sem restrição)" or not buscas:  
             buscas = ["promoção", "desconto", "oferta", "achadinhos", "utilidades", "presente"]  
             
-        # Remove duplicatas da lista de buscas  
         buscas = list(dict.fromkeys(buscas))  
         
         progresso = st.progress(0)  
@@ -454,6 +453,7 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         total_buscas = len(buscas)  
         total_bruto_acumulado = 0  
         total_descarte_hist = 0  
+        total_descarte_loja = 0  
         
         for index, kw in enumerate(buscas):  
             status_text.text(f"Buscando {qtd_por_keyword} ofertas para termo: '{kw}' (Modo: {opcao_ordem})...")  
@@ -469,11 +469,9 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
             todas_ofertas_filtradas.extend(boas)  
             total_bruto_acumulado += stats["total_bruto"]  
             total_descarte_hist += stats["descartes_historico"]  
+            total_descarte_loja += stats["descartes_loja"]  
             progresso.progress((index + 1) / total_buscas)  
         
-        if total_descarte_hist > 0 and len(todas_ofertas_filtradas) < 10:  
-            st.info(f"💡 **Diagnóstico de Histórico**: Foram encontradas {total_bruto_acumulado} ofertas brutas na Shopee, mas {total_descarte_hist} delas já tinham sido buscadas em testes anteriores e foram ignoradas pelo Histórico. Se quiser ver todas novamente, desmarque a opção 'Ignorar Ofertas Já Buscadas Antes' na barra lateral ou clique em 'Limpar Histórico'.")  
-            
         status_text.text("Gerando frases personalizadas com o Gemini AI...")  
         
         resultados_gerados = []  
