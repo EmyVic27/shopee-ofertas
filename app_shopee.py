@@ -20,6 +20,30 @@ st.set_page_config(
 API_URL = "https://open-api.affiliate.shopee.com.br/graphql"  
 HISTORICO_FILE = "historico_ofertas.json"  
 
+# ============== DICIONÁRIO DE CATEGORIAS DA SHOPEE ==============  
+
+CATEGORIAS_MAP = {  
+    "🎈 Festas, Lembrancinhas & Personalizados": [  
+        "lembrancinha", "festa infantil", "kit personalizado", "qualquer tema",   
+        "sacolinhas pvc", "pegue monte", "caixas personalizadas", "lembrancinha premium", "15 anos"  
+    ],  
+    "🏠 Casa, Cozinha & Utensílios": [  
+        "cozinha", "casa", "utilidades", "organizador", "eletrodomesticos", "decoração"  
+    ],  
+    "👗 Moda Feminina & Acessórios": [  
+        "moda feminina", "bolsas", "acessórios", "vestido", "bijuterias"  
+    ],  
+    "💄 Beleza & Cuidados": [  
+        "maquiagem", "skincare", "cabelos", "perfume", "unhas"  
+    ],  
+    "🧸 Brinquedos & Infantil": [  
+        "brinquedos", "jogos educativos", "maternidade", "infantil"  
+    ],  
+    "🌐 Busca Livre Geral (Todas as Categorias da Shopee)": [  
+        "promoção", "desconto", "oferta", "achadinhos", "utilidades"  
+    ]  
+}  
+
 # ============== POOL DIVERSICADO DE SEGURANÇA (SEM NOME DE PRODUTO) ==============  
 
 POOL_FALLBACK_FRASES = [  
@@ -51,10 +75,11 @@ def gerar_assinatura(app_id: str, app_secret: str, payload: str, timestamp: int)
     base = f"{app_id}{timestamp}{payload}{app_secret}"  
     return hashlib.sha256(base.encode("utf-8")).hexdigest()  
 
-def buscar_ofertas(app_id: str, app_secret: str, keyword, limit: int = 10, page: int = 1):  
+def buscar_ofertas(app_id: str, app_secret: str, keyword, limit: int = 10, page: int = 1, sort_type: int = 1):  
+    """Consulta a API da Shopee. sort_type: 1 = Relevância (Site), 2 = Comissão, 3 = Populares/Vendas"""  
     query = """  
-    query buscarOfertas($keyword: String, $limit: Int, $page: Int) {  
-        productOfferV2(keyword: $keyword, limit: $limit, page: $page, sortType: 2) {  
+    query buscarOfertas($keyword: String, $limit: Int, $page: Int, $sortType: Int) {  
+        productOfferV2(keyword: $keyword, limit: $limit, page: $page, sortType: $sortType) {  
             nodes {  
                 itemId  
                 productName  
@@ -79,7 +104,12 @@ def buscar_ofertas(app_id: str, app_secret: str, keyword, limit: int = 10, page:
     """  
     payload = json.dumps({  
         "query": query,  
-        "variables": {"keyword": keyword if keyword else None, "limit": limit, "page": page}  
+        "variables": {  
+            "keyword": keyword if keyword else None,   
+            "limit": limit,   
+            "page": page,  
+            "sortType": sort_type  
+        }  
     })  
     
     timestamp = int(time.time())  
@@ -104,13 +134,13 @@ def buscar_ofertas(app_id: str, app_secret: str, keyword, limit: int = 10, page:
     except Exception as e:  
         return [], False, str(e)  
 
-def buscar_todas_ofertas(app_id: str, app_secret: str, keyword, total_desejado: int):  
+def buscar_todas_ofertas(app_id: str, app_secret: str, keyword, total_desejado: int, sort_type: int = 1):  
     todas = []  
     page = 1  
     while len(todas) < total_desejado:  
         restante = total_desejado - len(todas)  
         limite_pagina = min(50, restante)  
-        nodes, has_next, erro = buscar_ofertas(app_id, app_secret, keyword, limite_pagina, page)  
+        nodes, has_next, erro = buscar_ofertas(app_id, app_secret, keyword, limite_pagina, page, sort_type)  
         if erro or not nodes:  
             break  
         todas.extend(nodes)  
@@ -170,7 +200,6 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
     descartes_historico = 0  
     descartes_preco = 0  
     descartes_loja = 0  
-    descartes_desconto = 0  
     
     for oferta in ofertas:  
         comissao = float(oferta.get("commissionRate") or 0) * 100  
@@ -204,7 +233,6 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
         if filtrar_comissao and comissao < min_comissao:  
             continue  
         if filtrar_desconto and desconto < min_desconto:  
-            descartes_desconto += 1  
             continue  
             
         if usar_historico:  
@@ -276,7 +304,7 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:
 # ============== INTERFACE STREAMLIT ==============  
 
 st.title("🛍️ Painel de Ofertas Shopee + Gemini AI")  
-st.caption("Pesquise, selecione os melhores achados e envie individualmente ou em lote para o WhatsApp")  
+st.caption("Pesquise por categoria, palavras-chave ou busca livre para o WhatsApp")  
 
 # Sidebar - Configurações  
 st.sidebar.header("🔑 Autenticação e APIs")  
@@ -285,22 +313,56 @@ app_secret = st.sidebar.text_input("Shopee APP_SECRET", value="BLFN3YKFSMCSHSKY6
 gemini_key = st.sidebar.text_input("Gemini API Key", value="AQ.Ab8RN6JpRbEOoJTrl2mHywFNLg4-Hp8fJSrfBOJXFNoxj0C-sw", type="password")  
 
 st.sidebar.markdown("---")  
-st.sidebar.header("⚙️ Modo de Pesquisa")  
+st.sidebar.header("⚙️ Modo de Pesquisa e Categorias")  
 
-usar_keywords = st.sidebar.checkbox("Usar Palavras-Chave Específicas", value=True)  
+modo_busca = st.sidebar.radio(  
+    "Escolha como deseja pesquisar:",  
+    [  
+        "🏷️ Usar Categorias da Shopee",  
+        "✍️ Digitar Palavras-Chave Específicas",  
+        "🔀 Combinar Categorias + Palavras-Chave",  
+        "🌐 Busca Livre Geral (Sem restrição)"  
+    ]  
+)  
 
-if usar_keywords:  
-    keywords_input = st.sidebar.text_input(  
-        "Palavras-chave (separadas por vírgula):",  
-        value="lembrancinha, festa infantil, cozinha, casa, moda feminina, eletrodomesticos",  
-        help="Digite os termos desejados. Se desmarcar a caixa acima, a pesquisa trará os melhores achados gerais de qualquer categoria."  
+categorias_selecionadas = []  
+keywords_digitadas = ""  
+
+if modo_busca in ["🏷️ Usar Categorias da Shopee", "🔀 Combinar Categorias + Palavras-Chave"]:  
+    categorias_selecionadas = st.sidebar.multiselect(  
+        "Selecione as Categorias da Shopee:",  
+        list(CATEGORIAS_MAP.keys()),  
+        default=["🎈 Festas, Lembrancinhas & Personalizados", "🏠 Casa, Cozinha & Utensílios"]  
     )  
-else:  
-    keywords_input = ""  
-    st.sidebar.info("🔍 **Modo Busca Livre**: Pesquisando os melhores achados gerais da Shopee sem restringir por palavra-chave.")  
+
+if modo_busca in ["✍️ Digitar Palavras-Chave Específicas", "🔀 Combinar Categorias + Palavras-Chave"]:  
+    keywords_digitadas = st.sidebar.text_input(  
+        "Digite as Palavras-chave (separadas por vírgula):",  
+        value="qualquer tema, sacolinhas pvc, pegue monte, lembrancinha",  
+        help="Digite exatamente como você costuma pesquisar no aplicativo da Shopee."  
+    )  
+
+st.sidebar.markdown("---")  
+st.sidebar.header("🔍 Ordenação da Busca na Shopee")  
+
+opcao_ordem = st.sidebar.selectbox(  
+    "Ordenar Busca Por:",  
+    [  
+        "Relevância (Igual à pesquisa do site da Shopee)",  
+        "Mais Vendidos / Populares",  
+        "Maior Taxa de Comissão"  
+    ]  
+)  
+
+sort_type_map = {  
+    "Relevância (Igual à pesquisa do site da Shopee)": 1,  
+    "Mais Vendidos / Populares": 3,  
+    "Maior Taxa de Comissão": 2  
+}  
+sort_type_escolhido = sort_type_map[opcao_ordem]  
 
 qtd_por_keyword = st.sidebar.number_input(  
-    "Quantidade de Ofertas por Busca:",  
+    "Quantidade de Ofertas por Termo:",  
     min_value=5,  
     max_value=200,  
     value=30,  
@@ -313,11 +375,11 @@ st.sidebar.header("🏬 Filtros de Loja e Vendas")
 tipos_loja = st.sidebar.multiselect(  
     "Tipos de Loja na Shopee:",  
     [  
+        "Todas as Lojas (Recomendado - Maior volume)",  
         "Lojas Oficiais (Shopee Oficial)",  
-        "Lojas Indicadas (Shopee Indicado)",  
-        "Todas as Lojas"  
+        "Lojas Indicadas (Shopee Indicado)"  
     ],  
-    default=["Todas as Lojas"]  
+    default=["Todas as Lojas (Recomendado - Maior volume)"]  
 )  
 
 min_vendas = st.sidebar.number_input("Vendas Mínimas do Produto", value=0, step=5)  
@@ -367,10 +429,23 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         gemini_client = genai.Client(api_key=gemini_key)  
         historico = carregar_historico()  
         
-        if usar_keywords and keywords_input.strip():  
-            buscas = [k.strip() for k in re.split(r"[,\n]", keywords_input) if k.strip()]  
-        else:  
+        buscas = []  
+        
+        # Monta lista de termos de acordo com o modo escolhido  
+        if modo_busca in ["🏷️ Usar Categorias da Shopee", "🔀 Combinar Categorias + Palavras-Chave"]:  
+            for cat in categorias_selecionadas:  
+                buscas.extend(CATEGORIAS_MAP.get(cat, []))  
+                
+        if modo_busca in ["✍️ Digitar Palavras-Chave Específicas", "🔀 Combinar Categorias + Palavras-Chave"]:  
+            if keywords_digitadas.strip():  
+                kw_lista = [k.strip() for k in re.split(r"[,\n]", keywords_digitadas) if k.strip()]  
+                buscas.extend(kw_lista)  
+                
+        if modo_busca == "🌐 Busca Livre Geral (Sem restrição)" or not buscas:  
             buscas = ["promoção", "desconto", "oferta", "achadinhos", "utilidades", "presente"]  
+            
+        # Remove duplicatas da lista de buscas  
+        buscas = list(dict.fromkeys(buscas))  
         
         progresso = st.progress(0)  
         status_text = st.empty()  
@@ -381,10 +456,9 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         total_descarte_hist = 0  
         
         for index, kw in enumerate(buscas):  
-            rotulo = f"Busca Geral ('{kw}')" if not usar_keywords or not keywords_input.strip() else kw  
-            status_text.text(f"Buscando {qtd_por_keyword} ofertas para: {rotulo}...")  
+            status_text.text(f"Buscando {qtd_por_keyword} ofertas para termo: '{kw}' (Modo: {opcao_ordem})...")  
             
-            ofertas = buscar_todas_ofertas(app_id, app_secret, kw, qtd_por_keyword)  
+            ofertas = buscar_todas_ofertas(app_id, app_secret, kw, qtd_por_keyword, sort_type=sort_type_escolhido)  
             boas, stats = filtrar_ofertas(  
                 ofertas, historico, usar_historico,  
                 tipos_loja, min_vendas,  
@@ -445,7 +519,7 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
             salvar_historico(historico)  
         
         st.session_state.resultados = resultados_gerados  
-        status_text.success(f"Concluído! {len(resultados_gerados)} ofertas geradas.")  
+        status_text.success(f"Concluído! {len(resultados_gerados)} ofertas geradas de um total de {total_bruto_acumulado} produtos analisados na Shopee.")  
 
 # Exibição dos Resultados  
 
