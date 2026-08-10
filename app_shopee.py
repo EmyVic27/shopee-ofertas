@@ -93,7 +93,11 @@ def buscar_ofertas(app_id: str, app_secret: str, keyword, limit: int = 10, page:
                 shopId  
                 shopType  
                 sales  
-            }  
+            }
+            # ATENÇÃO: "sales" não é um campo confirmado no schema oficial da
+            # Shopee (não achamos documentação garantindo isso). Se a busca
+            # começar a retornar erro "Cannot query field 'sales'", remova essa
+            # linha e o filtro de vendas mínimas vai parar de funcionar até lá.  
             pageInfo {  
                 page  
                 limit  
@@ -137,17 +141,21 @@ def buscar_ofertas(app_id: str, app_secret: str, keyword, limit: int = 10, page:
 def buscar_todas_ofertas(app_id: str, app_secret: str, keyword, total_desejado: int, sort_type: int = 1):  
     todas = []  
     page = 1  
+    ultimo_erro = None  
     while len(todas) < total_desejado:  
         restante = total_desejado - len(todas)  
         limite_pagina = min(50, restante)  
         nodes, has_next, erro = buscar_ofertas(app_id, app_secret, keyword, limite_pagina, page, sort_type)  
-        if erro or not nodes:  
+        if erro:  
+            ultimo_erro = erro  
+            break  
+        if not nodes:  
             break  
         todas.extend(nodes)  
         if not has_next:  
             break  
         page += 1  
-    return todas  
+    return todas, ultimo_erro  
 
 def obter_tipos_loja(oferta) -> list:  
     shop_type = oferta.get("shopType")  
@@ -166,7 +174,7 @@ def normalizar_produto(nome: str) -> str:
     if not nome:  
         return ""  
     texto = nome.lower()  
-    texto = re.sub(r"\d+[/]\d*", " ", texto)  
+    texto = re.sub(r"\d+[/\d]*", " ", texto)  # remove qualquer número/sequência (05/25/50, 100, etc.)
     texto = re.sub(r"[^\w\sáàâãéêíóôõúüç]", " ", texto)  
     palavras = [p for p in texto.split() if p not in PALAVRAS_IGNORAR and len(p) > 2]  
     return " ".join(sorted(set(palavras[:8])))  
@@ -200,6 +208,7 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
     descartes_historico = 0  
     descartes_preco = 0  
     descartes_loja = 0  
+    descartes_vendas = 0  
     
     for oferta in ofertas:  
         comissao = float(oferta.get("commissionRate") or 0) * 100  
@@ -225,6 +234,7 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
             continue  
             
         if vendas < min_vendas:  
+            descartes_vendas += 1  
             continue  
             
         if (min_preco > 0 and preco < min_preco) or (max_preco > 0 and preco > max_preco):  
@@ -250,11 +260,75 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
         "passaram": len(filtradas),  
         "descartes_historico": descartes_historico,  
         "descartes_preco": descartes_preco,  
-        "descartes_loja": descartes_loja  
+        "descartes_loja": descartes_loja,  
+        "descartes_vendas": descartes_vendas  
     }  
     return filtradas, stats  
 
-def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:  
+def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: str, frases_recentes: list) -> list:
+    """Gera UMA frase pra cada oferta do lote, mas numa ÚNICA chamada ao Gemini
+    (bem mais rápido e mais barato que uma chamada por oferta). Pede o
+    resultado em JSON e valida antes de aceitar."""
+    itens_prompt = "\n".join(
+        f"{i+1}. Preço R$ {o.get('price') or o.get('priceMin') or '?'}, desconto {o.get('priceDiscountRate', 0)}%"
+        for i, o in enumerate(ofertas_lote)
+    )
+
+    bloco_recentes = ""
+    if frases_recentes:
+        ultimas = frases_recentes[-15:]
+        bloco_recentes = "Frases já usadas — NÃO repita nenhuma estrutura parecida com estas:\n"
+        bloco_recentes += "\n".join(f"- {f}" for f in ultimas)
+
+    prompt = f"""
+    Você é a Carla Barce (influencer de festas, casa e achadinhos no WhatsApp).
+    Preciso de {len(ofertas_lote)} frases CURTAS e IMPERDÍVEIS, uma para cada
+    item da lista abaixo (na mesma ordem), pra campanha de cupons 8.8 da Shopee.
+
+    Itens:
+    {itens_prompt}
+
+    {bloco_recentes}
+
+    REGRAS ESTRITAS E OBRIGATÓRIAS:
+    1. JAMAIS mencione nome de produto.
+    2. Cada frase começa de um jeito DIFERENTE das outras — sem repetir "Gente, olha" em mais de uma.
+    3. Tom: {estilo_prompt}. Foque em urgência, cupom 8.8, achadinho que vale a pena, economia real.
+    4. 1 a 2 emojis por frase.
+    5. No máximo 10 a 14 palavras por frase.
+    6. Responda APENAS com um JSON no formato: {{"frases": ["frase 1", "frase 2", ...]}}
+       Sem markdown, sem explicação, sem texto fora do JSON.
+    """
+
+    modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
+    for mod in modelos:
+        try:
+            response = gemini_client.models.generate_content(
+                model=mod,
+                contents=prompt,
+                config={"temperature": 1.15, "response_mime_type": "application/json"},
+            )
+            if not response or not response.text:
+                continue
+            texto = response.text.strip()
+            texto = re.sub(r"^```json|```$", "", texto).strip()
+            dados = json.loads(texto)
+            frases = dados.get("frases", [])
+            if len(frases) >= len(ofertas_lote):
+                return [f.strip() for f in frases[:len(ofertas_lote)]]
+        except Exception:
+            continue
+
+    # Se o lote falhar (JSON quebrado, todos os modelos indisponíveis etc.),
+    # cai pro método individual item a item, que é mais lento mas mais robusto.
+    resultado = []
+    for oferta in ofertas_lote:
+        resultado.append(gerar_frase_gemini(gemini_client, oferta, estilo_prompt, frases_recentes + resultado))
+    return resultado
+
+
+def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recentes: list) -> str:  
     preco = oferta.get("price") or oferta.get("priceMin") or ""  
     desconto = oferta.get("priceDiscountRate", "")  
 
@@ -267,6 +341,14 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:
     ]  
     angulo_escolhido = random.choice(angulos)  
 
+    # Mostra pro Gemini as últimas frases geradas nesta mesma rodada, pra ele
+    # ativamente evitar repetir a mesma estrutura/abertura.
+    bloco_recentes = ""  
+    if frases_recentes:  
+        ultimas = frases_recentes[-8:]  
+        bloco_recentes = "NÃO repita a estrutura, abertura ou ideia destas frases já usadas agora:\n"  
+        bloco_recentes += "\n".join(f"- {f}" for f in ultimas)  
+
     prompt = f"""  
     Você é a Carla Barce (influencer de festas, casa e achadinhos de ofertas no WhatsApp).  
     Crie UMA ÚNICA FRASE CURTA, IMPERDÍVEL E MUITO NATURAL para mandar no seu grupo durante a campanha de cupons 8.8 da Shopee.  
@@ -275,6 +357,8 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:
     - Preço: R$ {preco}  
     - Desconto: {desconto}%  
     - Tom principal: {estilo_prompt} ({angulo_escolhido})  
+
+    {bloco_recentes}  
 
     REGRAS ESTRITAS E OBRIGATÓRIAS:  
     1. JAMAIS mencione o nome do produto. NUNCA coloque o nome do item no texto.  
@@ -291,27 +375,45 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str) -> str:
         try:  
             response = gemini_client.models.generate_content(  
                 model=mod,  
-                contents=prompt  
+                contents=prompt,  
+                config={"temperature": 1.15},  # eleva a variação das respostas  
             )  
             if response and response.text:  
                 res = response.text.strip().replace("\n", " ").replace('"', '')  
-                if len(res) > 5 and not res.lower().startswith("gente, olha"):  
+                if len(res) > 5 and not res.lower().startswith("gente, olha") and res not in frases_recentes:  
                     return res  
         except Exception:  
             continue  
 
-    return random.choice(POOL_FALLBACK_FRASES)  
+    # Fallback: garante que não repete nem no pool estático  
+    opcoes_livres = [f for f in POOL_FALLBACK_FRASES if f not in frases_recentes]  
+    return random.choice(opcoes_livres or POOL_FALLBACK_FRASES)  
 
 # ============== INTERFACE STREAMLIT ==============  
 
 st.title("🛍️ Painel de Ofertas Shopee + Gemini AI")  
 st.caption("Pesquise por categoria, palavras-chave ou busca livre para o WhatsApp")  
 
-# Sidebar - Configurações  
-st.sidebar.header("🔑 Autenticação e APIs")  
-app_id = st.sidebar.text_input("Shopee APP_ID", value="18325850447")  
-app_secret = st.sidebar.text_input("Shopee APP_SECRET", value="BLFN3YKFSMCSHSKY65YQMFUMRDLCHPYY", type="password")  
-gemini_key = st.sidebar.text_input("Gemini API Key", value="AQ.Ab8RN6JpRbEOoJTrl2mHywFNLg4-Hp8fJSrfBOJXFNoxj0C-sw", type="password")  
+# Sidebar - Configurações
+# IMPORTANTE (segurança): as chaves NÃO ficam mais escritas no código.
+# Elas vêm de variáveis de ambiente ou do arquivo .streamlit/secrets.toml
+# (que você cria localmente e NUNCA sobe pro GitHub / Streamlit Cloud).
+# Veja as instruções no final do arquivo sobre como criar esse secrets.toml.
+st.sidebar.header("🔑 Autenticação e APIs")
+
+def _valor_padrao(nome_secret: str) -> str:
+    """Busca a chave em st.secrets (se configurado) ou variável de ambiente.
+    Se não achar em lugar nenhum, deixa em branco pro usuário preencher na hora."""
+    try:
+        if nome_secret in st.secrets:
+            return st.secrets[nome_secret]
+    except Exception:
+        pass
+    return os.environ.get(nome_secret, "")
+
+app_id = st.sidebar.text_input("Shopee APP_ID", value=_valor_padrao("SHOPEE_APP_ID"))
+app_secret = st.sidebar.text_input("Shopee APP_SECRET", value=_valor_padrao("SHOPEE_APP_SECRET"), type="password")
+gemini_key = st.sidebar.text_input("Gemini API Key", value=_valor_padrao("GEMINI_API_KEY"), type="password")
 
 st.sidebar.markdown("---")  
 st.sidebar.header("⚙️ Modo de Pesquisa e Categorias")  
@@ -394,7 +496,7 @@ with col_p2:
 st.sidebar.markdown("---")  
 st.sidebar.header("🎯 Histórico e Filtros")  
 
-usar_historico = st.sidebar.checkbox("Ignorar Ofertas Já Buscadas Antes (Histórico)", value=False)  
+usar_historico = st.sidebar.checkbox("Ignorar Ofertas Já Buscadas Antes (Histórico)", value=True)  
 
 if st.sidebar.button("🧹 Limpar Histórico do Servidor"):  
     limpar_historico_arquivo()  
@@ -417,6 +519,11 @@ estilo_prompt = st.sidebar.selectbox(
         "Oportunidade Imperdível (Foco em economizar)"  
     ]  
 )  
+tamanho_lote_gemini = st.sidebar.slider(
+    "Ofertas por chamada ao Gemini (lote)",
+    min_value=5, max_value=25, value=10,
+    help="Números maiores = menos chamadas à API = mais rápido e mais barato. Se notar frases de baixa qualidade, diminua."
+)
 
 # Conteúdo Principal  
 
@@ -458,7 +565,9 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         for index, kw in enumerate(buscas):  
             status_text.text(f"Buscando {qtd_por_keyword} ofertas para termo: '{kw}' (Modo: {opcao_ordem})...")  
             
-            ofertas = buscar_todas_ofertas(app_id, app_secret, kw, qtd_por_keyword, sort_type=sort_type_escolhido)  
+            ofertas, erro_busca = buscar_todas_ofertas(app_id, app_secret, kw, qtd_por_keyword, sort_type=sort_type_escolhido)  
+            if erro_busca:  
+                st.warning(f"⚠️ Erro ao buscar '{kw}': {erro_busca}")  
             boas, stats = filtrar_ofertas(  
                 ofertas, historico, usar_historico,  
                 tipos_loja, min_vendas,  
@@ -482,33 +591,37 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         progresso_gemini = st.progress(0)  
         total_boas = len(todas_ofertas_filtradas)  
         
-        for idx, oferta in enumerate(todas_ofertas_filtradas):  
-            frase = gerar_frase_gemini(gemini_client, oferta, estilo_prompt)  
-            link = oferta.get("offerLink", "")  
-            texto_final = f"cta[{frase.upper()}]\n\n{link}"  
-            
-            texto_encoded = urllib.parse.quote(texto_final)  
-            whatsapp_url = f"https://api.whatsapp.com/send?text={texto_encoded}"  
-            
-            resultados_gerados.append({  
-                "id": idx,  
-                "oferta": oferta,  
-                "frase": frase,  
-                "texto_final": texto_final,  
-                "whatsapp_url": whatsapp_url,  
-                "link": link,  
-                "selecionado": True  
-            })  
-            
-            novos_links.append(link)  
-            p_key = normalizar_produto(oferta.get("productName", ""))  
-            if p_key:  
-                novos_produtos.append(p_key)  
-            novas_frases.append(frase)  
-            
-            if total_boas > 0:  
-                progresso_gemini.progress((idx + 1) / total_boas)  
-            time.sleep(0.5)  
+        idx_global = 0
+        for inicio in range(0, total_boas, tamanho_lote_gemini):
+            lote = todas_ofertas_filtradas[inicio:inicio + tamanho_lote_gemini]
+            frases_do_lote = gerar_frases_lote_gemini(gemini_client, lote, estilo_prompt, novas_frases)
+
+            for oferta, frase in zip(lote, frases_do_lote):
+                link = oferta.get("offerLink", "")
+                texto_final = f"cta[{frase.upper()}]\n\n{link}"
+
+                texto_encoded = urllib.parse.quote(texto_final)
+                whatsapp_url = f"https://api.whatsapp.com/send?text={texto_encoded}"
+
+                resultados_gerados.append({
+                    "id": idx_global,
+                    "oferta": oferta,
+                    "frase": frase,
+                    "texto_final": texto_final,
+                    "whatsapp_url": whatsapp_url,
+                    "link": link,
+                    "selecionado": True
+                })
+
+                novos_links.append(link)
+                p_key = normalizar_produto(oferta.get("productName", ""))
+                if p_key:
+                    novos_produtos.append(p_key)
+                novas_frases.append(frase)
+                idx_global += 1
+
+            if total_boas > 0:
+                progresso_gemini.progress(min(idx_global / total_boas, 1.0))  
         
         if usar_historico and resultados_gerados:  
             historico["links"] = list(set(historico["links"]) | set(novos_links))  
