@@ -47,25 +47,25 @@ CATEGORIAS_MAP = {
 # ============== POOL DIVERSICADO DE SEGURANÇA (SEM NOME DE PRODUTO) ==============  
 
 POOL_FALLBACK_FRASES = [  
-    "Amiga, corre que o cupom do 8.8 tá voando da tela! 🏃‍♀️💨",  
+    "Amiga, corre que isso não vai durar muito! 🏃‍♀️💨",  
     "Gente, socorro, achei um achadinho bom demais pra deixar passar! 😱",  
-    "Óoo lindeza, e olha o valor disso com desconto! 😍",  
-    "Para tudo, essa promoção relâmpago vai esgotar rápido! ⚡",  
-    "Amiga, isso tá quase de graça hoje, olha só! 🤑",  
-    "Separei isso especialmente pra você aproveitar o cupom! 💛",  
+    "Óoo lindeza, e olha o valor disso! 😍",  
+    "Para tudo, isso aqui é achado e vai esgotar rápido! ⚡",  
+    "Amiga, isso tá quase de graça, olha só! 🤑",  
+    "Separei isso especialmente pra você! 💛",  
     "Corre, corre, que isso não vai durar nem 5 minutos! 🏃‍♀️💨",  
-    "Achei e já vim correndo te contar antes que subam o preço! 😍",  
+    "Achei e já vim correndo te contar antes que suba o preço! 😍",  
     "Amiga, larga tudo e aproveita esse achadinho de hoje! 👀",  
-    "Gente, preço bom desse jeito no 8.8 não dura nada! ⏳",  
+    "Gente, preço bom desse jeito não dura nada! ⏳",  
     "Amiga, essa dica é de ouro pra quem ama economizar! ✨",  
-    "Aqui é chance rara, pega seu cupom e garante já! 🍀",  
+    "Aqui é chance rara, garante já! 🍀",  
     "Amiga, você não tem noção do tanto que vale a pena! 🎁",  
-    "Gente, esse preço com cupom ficou um absurdo de barato! 💣",  
-    "Amiga, essa dica vale cada segundo, aproveita antes que esgoste! 💕",  
+    "Gente, esse preço ficou um absurdo de barato! 💣",  
+    "Amiga, essa dica vale cada segundo, aproveita antes que esgote! 💕",  
     "Isso aqui tá voando da prateleira, pega o seu rápido! 🛒",  
-    "Amiga, hoje é dia de sorte com esse descontaço! 🌟",  
+    "Amiga, hoje é dia de sorte com esse preço! 🌟",  
     "Gente, eu juro que fiquei de boca aberta com esse valor! 😮",  
-    "Amiga, pega o cupom que fica ainda mais barato, corre! 🎟️",  
+    "Amiga, corre que fica ainda mais em conta! 🎟️",  
     "Isso aqui é hit garantido, separado com todo carinho! 🌸"  
 ]  
 
@@ -265,10 +265,14 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
     }  
     return filtradas, stats  
 
-def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: str, frases_recentes: list) -> list:
+def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: str, frases_recentes: list, campanha_texto: str, mencionar_cupom: bool) -> list:
     """Gera UMA frase pra cada oferta do lote, mas numa ÚNICA chamada ao Gemini
     (bem mais rápido e mais barato que uma chamada por oferta). Pede o
-    resultado em JSON e valida antes de aceitar."""
+    resultado em JSON e valida antes de aceitar.
+
+    campanha_texto: contexto de campanha específico (ex: "campanha do dia 9.9")
+    — deixe vazio para mensagens genéricas, sem menção a data nenhuma.
+    mencionar_cupom: se True, instrui a IA a mencionar cupom quando fizer sentido."""
     itens_prompt = "\n".join(
         f"{i+1}. Preço R$ {o.get('price') or o.get('priceMin') or '?'}, desconto {o.get('priceDiscountRate', 0)}%"
         for i, o in enumerate(ofertas_lote)
@@ -280,10 +284,16 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
         bloco_recentes = "Frases já usadas — NÃO repita nenhuma estrutura parecida com estas:\n"
         bloco_recentes += "\n".join(f"- {f}" for f in ultimas)
 
+    linha_contexto = f"Contexto da campanha: {campanha_texto}." if campanha_texto.strip() else "Sem campanha ou data específica — mensagem genérica, atemporal, sem mencionar nenhuma data."
+    linha_cupom = "Pode mencionar cupom quando fizer sentido." if mencionar_cupom else "NÃO mencione cupom em nenhuma frase."
+
     prompt = f"""
     Você é a Carla Barce (influencer de festas, casa e achadinhos no WhatsApp).
     Preciso de {len(ofertas_lote)} frases CURTAS e IMPERDÍVEIS, uma para cada
-    item da lista abaixo (na mesma ordem), pra campanha de cupons 8.8 da Shopee.
+    item da lista abaixo (na mesma ordem).
+
+    {linha_contexto}
+    {linha_cupom}
 
     Itens:
     {itens_prompt}
@@ -293,7 +303,7 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     REGRAS ESTRITAS E OBRIGATÓRIAS:
     1. JAMAIS mencione nome de produto.
     2. Cada frase começa de um jeito DIFERENTE das outras — sem repetir "Gente, olha" em mais de uma.
-    3. Tom: {estilo_prompt}. Foque em urgência, cupom 8.8, achadinho que vale a pena, economia real.
+    3. Tom: {estilo_prompt}. Foque em urgência, achadinho que vale a pena, economia real.
     4. 1 a 2 emojis por frase.
     5. No máximo 10 a 14 palavras por frase.
     6. Responda APENAS com um JSON no formato: {{"frases": ["frase 1", "frase 2", ...]}}
@@ -324,17 +334,17 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     # cai pro método individual item a item, que é mais lento mas mais robusto.
     resultado = []
     for oferta in ofertas_lote:
-        resultado.append(gerar_frase_gemini(gemini_client, oferta, estilo_prompt, frases_recentes + resultado))
+        resultado.append(gerar_frase_gemini(gemini_client, oferta, estilo_prompt, frases_recentes + resultado, campanha_texto, mencionar_cupom))
     return resultado
 
 
-def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recentes: list) -> str:  
+def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recentes: list, campanha_texto: str = "", mencionar_cupom: bool = False) -> str:  
     preco = oferta.get("price") or oferta.get("priceMin") or ""  
     desconto = oferta.get("priceDiscountRate", "")  
 
     angulos = [  
-        "Tom de amiga íntima compartilhando um achadinho no evento 8.8",  
-        "Urgência e velocidade com cupons relâmpago esgotando",  
+        "Tom de amiga íntima compartilhando um achadinho",  
+        "Urgência e velocidade, achadinho que pode esgotar",  
         "Empolgação com utilidade prática para lembrancinha/festa ou casa",  
         "Surpresa com o preço extremamente baixo e oportunidade única",  
         "Recomendação direta e carinhosa de quem ama economizar"  
@@ -349,21 +359,26 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
         bloco_recentes = "NÃO repita a estrutura, abertura ou ideia destas frases já usadas agora:\n"  
         bloco_recentes += "\n".join(f"- {f}" for f in ultimas)  
 
+    linha_contexto = f"Contexto da campanha: {campanha_texto}." if campanha_texto.strip() else "Sem campanha ou data específica — mensagem genérica, atemporal, sem mencionar nenhuma data."
+    linha_cupom = "Pode mencionar cupom quando fizer sentido." if mencionar_cupom else "NÃO mencione cupom."
+
     prompt = f"""  
     Você é a Carla Barce (influencer de festas, casa e achadinhos de ofertas no WhatsApp).  
-    Crie UMA ÚNICA FRASE CURTA, IMPERDÍVEL E MUITO NATURAL para mandar no seu grupo durante a campanha de cupons 8.8 da Shopee.  
+    Crie UMA ÚNICA FRASE CURTA, IMPERDÍVEL E MUITO NATURAL para mandar no seu grupo.  
 
     Dados da promoção:  
     - Preço: R$ {preco}  
     - Desconto: {desconto}%  
     - Tom principal: {estilo_prompt} ({angulo_escolhido})  
+    - {linha_contexto}
+    - {linha_cupom}
 
     {bloco_recentes}  
 
     REGRAS ESTRITAS E OBRIGATÓRIAS:  
     1. JAMAIS mencione o nome do produto. NUNCA coloque o nome do item no texto.  
     2. JAMAIS comece com "Gente, olha essa oferta" ou "Gente, olha só". Alterne completamente o início da frase.  
-    3. Foque em: urgência, cupons 8.8, achadinho que vale a pena, economia real ou carinho com as seguidoras.  
+    3. Foque em: urgência, achadinho que vale a pena, economia real ou carinho com as seguidoras.  
     4. Use de 1 a 2 emojis alegres e adequados.  
     5. Mantenha o texto CURTO (no máximo 10 a 14 palavras) para leitura instantânea.  
     6. Responda APENAS com a frase final, sem aspas, sem explicações e sem introduções.  
@@ -509,16 +524,34 @@ filtrar_comissao = st.sidebar.checkbox("Filtrar por Comissão Mínima", value=Fa
 min_comissao = st.sidebar.slider("Comissão Mínima (%)", 1.0, 30.0, 8.0) if filtrar_comissao else 0  
 
 st.sidebar.markdown("---")  
-st.sidebar.header("✍️ Tom e Estilo do Gemini")  
+st.sidebar.header("✍️ Tom e Estilo da Mensagem")  
 estilo_prompt = st.sidebar.selectbox(  
-    "Estilo da Frase:",  
+    "Escolha o tom da mensagem:",  
     [  
-        "Amiga / Achadinhos (Especial Cupons 8.8)",  
-        "Urgência / Promoção Relâmpago (Poucas unidades)",  
-        "Festa Infantil & Maternidade (Dica de amiga)",  
-        "Oportunidade Imperdível (Foco em economizar)"  
+        "Amiga / Achadinho (padrão, caloroso e natural)",  
+        "Urgência / Poucas unidades restantes",  
+        "Festa Infantil & Maternidade (dica de amiga)",  
+        "Oportunidade imperdível (foco em economia)",  
+        "Emocionada / Reação de surpresa com o preço",  
+        "Direta e objetiva (sem enrolação)",  
     ]  
 )  
+
+st.sidebar.markdown("---")
+st.sidebar.header("🗓️ Campanha específica (opcional)")
+campanha_ativa = st.sidebar.checkbox("Mencionar uma data/campanha específica nas frases?", value=False)
+campanha_texto = ""
+if campanha_ativa:
+    dia_duplo = st.sidebar.text_input(
+        "Qual data/campanha? (ex: 9.9, 10.10, 11.11, Black Friday)",
+        value="",
+        placeholder="ex: 9.9"
+    )
+    if dia_duplo.strip():
+        campanha_texto = f"campanha do dia {dia_duplo.strip()}"
+
+mencionar_cupom = st.sidebar.checkbox("Mencionar cupom nas frases?", value=False)
+
 tamanho_lote_gemini = st.sidebar.slider(
     "Ofertas por chamada ao Gemini (lote)",
     min_value=5, max_value=25, value=10,
@@ -594,7 +627,7 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         idx_global = 0
         for inicio in range(0, total_boas, tamanho_lote_gemini):
             lote = todas_ofertas_filtradas[inicio:inicio + tamanho_lote_gemini]
-            frases_do_lote = gerar_frases_lote_gemini(gemini_client, lote, estilo_prompt, novas_frases)
+            frases_do_lote = gerar_frases_lote_gemini(gemini_client, lote, estilo_prompt, novas_frases, campanha_texto, mencionar_cupom)
 
             for oferta, frase in zip(lote, frases_do_lote):
                 link = oferta.get("offerLink", "")
