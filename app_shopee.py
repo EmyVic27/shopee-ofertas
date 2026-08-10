@@ -265,6 +265,61 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
     }  
     return filtradas, stats  
 
+# ============== FOCO E ÂNGULO POR TOM ==============
+# Cada tom tem seu próprio foco — assim "Amiga / Achadinho" não fica
+# contaminado com linguagem de urgência/promoção que pertence a outros tons.
+
+TONS_CONFIG = {
+    "Amiga / Achadinho (padrão, caloroso e natural)": {
+        "foco": "carinho genuíno, proximidade e recomendação sincera — NADA de linguagem de propaganda, promoção ou urgência",
+        "angulos": [
+            "Tom de amiga próxima recomendando com carinho, sem pressa nenhuma",
+            "Empolgação calorosa e genuína, como quem compartilha algo bom com uma amiga",
+            "Recomendação natural, tranquila, como numa conversa de WhatsApp entre amigas",
+            "Carinho e cuidado, tipo 'lembrei de você quando vi isso'",
+        ],
+    },
+    "Urgência / Poucas unidades restantes": {
+        "foco": "urgência real, poucas unidades, sensação de que pode acabar a qualquer momento",
+        "angulos": [
+            "Urgência e velocidade, achadinho que pode esgotar",
+            "Correria genuína, tipo 'corre que já era quando eu vi'",
+        ],
+    },
+    "Festa Infantil & Maternidade (dica de amiga)": {
+        "foco": "praticidade pra quem organiza festa infantil ou é mãe, tom de dica útil entre amigas",
+        "angulos": [
+            "Dica prática de mãe pra mãe, sem pressa, focada em utilidade",
+            "Empolgação com achado que facilita a vida de quem organiza festa",
+        ],
+    },
+    "Oportunidade imperdível (foco em economia)": {
+        "foco": "economia real, quanto vale a pena, sem apelar pra urgência artificial",
+        "angulos": [
+            "Recomendação direta focada em quanto compensa financeiramente",
+            "Surpresa genuína com o quanto o preço vale a pena",
+        ],
+    },
+    "Emocionada / Reação de surpresa com o preço": {
+        "foco": "reação espontânea e emocionada com o preço, tipo 'não acreditei quando vi'",
+        "angulos": [
+            "Surpresa genuína e emocionada com o preço baixo",
+            "Reação de choque bom, tipo 'juro que não acreditei'",
+        ],
+    },
+    "Direta e objetiva (sem enrolação)": {
+        "foco": "direto ao ponto, sem enrolação, sem apelo emocional forçado",
+        "angulos": [
+            "Frase direta e curta, sem rodeios, quase informativa mas simpática",
+        ],
+    },
+}
+
+
+def _config_do_tom(estilo_prompt: str) -> dict:
+    return TONS_CONFIG.get(estilo_prompt, TONS_CONFIG["Amiga / Achadinho (padrão, caloroso e natural)"])
+
+
 def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: str, frases_recentes: list, campanha_texto: str, mencionar_cupom: bool) -> list:
     """Gera UMA frase pra cada oferta do lote, mas numa ÚNICA chamada ao Gemini
     (bem mais rápido e mais barato que uma chamada por oferta). Pede o
@@ -273,6 +328,9 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     campanha_texto: contexto de campanha específico (ex: "campanha do dia 9.9")
     — deixe vazio para mensagens genéricas, sem menção a data nenhuma.
     mencionar_cupom: se True, instrui a IA a mencionar cupom quando fizer sentido."""
+    config_tom = _config_do_tom(estilo_prompt)
+    angulo_escolhido = random.choice(config_tom["angulos"])
+
     itens_prompt = "\n".join(
         f"{i+1}. Preço R$ {o.get('price') or o.get('priceMin') or '?'}, desconto {o.get('priceDiscountRate', 0)}%"
         for i, o in enumerate(ofertas_lote)
@@ -303,8 +361,8 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     REGRAS ESTRITAS E OBRIGATÓRIAS:
     1. JAMAIS mencione nome de produto.
     2. Cada frase começa de um jeito DIFERENTE das outras — sem repetir "Gente, olha" em mais de uma.
-    3. Tom: {estilo_prompt}. Foque em urgência, achadinho que vale a pena, economia real.
-    4. 1 a 2 emojis por frase.
+    3. Tom obrigatório: {config_tom['foco']}. Ângulo de inspiração: {angulo_escolhido}.
+    4. 1 a 2 emojis por frase, coerentes com o tom pedido (nada de emoji de "correria" se o tom for calmo).
     5. No máximo 10 a 14 palavras por frase.
     6. Responda APENAS com um JSON no formato: {{"frases": ["frase 1", "frase 2", ...]}}
        Sem markdown, sem explicação, sem texto fora do JSON.
@@ -342,14 +400,8 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
     preco = oferta.get("price") or oferta.get("priceMin") or ""  
     desconto = oferta.get("priceDiscountRate", "")  
 
-    angulos = [  
-        "Tom de amiga íntima compartilhando um achadinho",  
-        "Urgência e velocidade, achadinho que pode esgotar",  
-        "Empolgação com utilidade prática para lembrancinha/festa ou casa",  
-        "Surpresa com o preço extremamente baixo e oportunidade única",  
-        "Recomendação direta e carinhosa de quem ama economizar"  
-    ]  
-    angulo_escolhido = random.choice(angulos)  
+    config_tom = _config_do_tom(estilo_prompt)
+    angulo_escolhido = random.choice(config_tom["angulos"])
 
     # Mostra pro Gemini as últimas frases geradas nesta mesma rodada, pra ele
     # ativamente evitar repetir a mesma estrutura/abertura.
@@ -369,7 +421,7 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
     Dados da promoção:  
     - Preço: R$ {preco}  
     - Desconto: {desconto}%  
-    - Tom principal: {estilo_prompt} ({angulo_escolhido})  
+    - Tom obrigatório: {config_tom['foco']}. Ângulo de inspiração: {angulo_escolhido}.
     - {linha_contexto}
     - {linha_cupom}
 
@@ -378,8 +430,8 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
     REGRAS ESTRITAS E OBRIGATÓRIAS:  
     1. JAMAIS mencione o nome do produto. NUNCA coloque o nome do item no texto.  
     2. JAMAIS comece com "Gente, olha essa oferta" ou "Gente, olha só". Alterne completamente o início da frase.  
-    3. Foque em: urgência, achadinho que vale a pena, economia real ou carinho com as seguidoras.  
-    4. Use de 1 a 2 emojis alegres e adequados.  
+    3. Respeite rigorosamente o tom obrigatório acima — nada de linguagem de outro tom.
+    4. Use de 1 a 2 emojis alegres e coerentes com o tom pedido.  
     5. Mantenha o texto CURTO (no máximo 10 a 14 palavras) para leitura instantânea.  
     6. Responda APENAS com a frase final, sem aspas, sem explicações e sem introduções.  
     """  
@@ -400,9 +452,15 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
         except Exception:  
             continue  
 
-    # Fallback: garante que não repete nem no pool estático  
-    opcoes_livres = [f for f in POOL_FALLBACK_FRASES if f not in frases_recentes]  
-    return random.choice(opcoes_livres or POOL_FALLBACK_FRASES)  
+    # Fallback: garante que não repete nem no pool estático, e evita
+    # linguagem de correria/urgência se o tom escolhido não pedir isso
+    tom_calmo = "amiga" in estilo_prompt.lower() or "maternidade" in estilo_prompt.lower() or "economia" in estilo_prompt.lower()
+    palavras_urgencia = ("corre", "voando", "esgot", "última", "acabando")
+    pool_filtrado = POOL_FALLBACK_FRASES
+    if tom_calmo:
+        pool_filtrado = [f for f in POOL_FALLBACK_FRASES if not any(p in f.lower() for p in palavras_urgencia)]
+    opcoes_livres = [f for f in (pool_filtrado or POOL_FALLBACK_FRASES) if f not in frases_recentes]  
+    return random.choice(opcoes_livres or pool_filtrado or POOL_FALLBACK_FRASES)  
 
 # ============== INTERFACE STREAMLIT ==============  
 
