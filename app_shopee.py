@@ -19,26 +19,125 @@ st.set_page_config(
 
 API_URL = "https://open-api.affiliate.shopee.com.br/graphql"  
 HISTORICO_FILE = "historico_ofertas.json"  
+SESSAO_FILE = "sessao_app.json"
+
+# ============== PERSISTÊNCIA DE SESSÃO EM DISCO ==============
+# Isso resolve o problema de perder as ofertas e os filtros toda vez que o
+# navegador recarrega a aba (comum no celular quando você troca de app pra
+# mandar a oferta no WhatsApp e volta). Diferente do st.session_state (que
+# só existe enquanto a aba fica conectada), isso fica salvo em arquivo.
+
+DEFAULTS_SESSAO = {
+    "k_modo_busca": "🏷️ Usar Categorias da Shopee",
+    "k_categorias": ["🎈 Festas, Lembrancinhas & Personalizados", "🏠 Casa, Cozinha & Utensílios"],
+    "k_keywords": "qualquer tema, sacolinhas pvc, pegue monte, lembrancinha",
+    "k_ordem": "Relevância (Igual à pesquisa do site da Shopee)",
+    "k_qtd_termo": 30,
+    "k_tipos_loja": ["Todas as Lojas (Recomendado - Maior volume)"],
+    "k_min_vendas": 0,
+    "k_min_price": 0.0,
+    "k_max_price": 0.0,
+    "k_usar_historico": True,
+    "k_filtrar_desconto": False,
+    "k_min_desconto": 20,
+    "k_filtrar_comissao": False,
+    "k_min_comissao": 8.0,
+    "k_estilo_prompt": "Amiga / Achadinho (padrão, caloroso e natural)",
+    "k_campanha_ativa": False,
+    "k_dia_duplo": "",
+    "k_mencionar_cupom": False,
+    "k_tamanho_lote": 10,
+    "resultados": [],
+}
+
+
+def carregar_sessao_disco() -> dict:
+    if os.path.exists(SESSAO_FILE):
+        try:
+            with open(SESSAO_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def salvar_sessao_disco():
+    dados = {chave: st.session_state.get(chave) for chave in DEFAULTS_SESSAO}
+    try:
+        with open(SESSAO_FILE, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # se der erro ao salvar, não trava o app
+
+
+# Roda só uma vez por sessão nova: carrega o que tinha salvo antes (se tinha)
+if "sessao_ja_carregada" not in st.session_state:
+    dados_salvos = carregar_sessao_disco()
+    valores_iniciais = {**DEFAULTS_SESSAO, **dados_salvos}
+    for chave, valor in valores_iniciais.items():
+        st.session_state[chave] = valor
+    st.session_state.sessao_ja_carregada = True
+
 
 # ============== DICIONÁRIO DE CATEGORIAS DA SHOPEE ==============  
 
 CATEGORIAS_MAP = {  
     "🎈 Festas, Lembrancinhas & Personalizados": [  
         "lembrancinha", "festa infantil", "kit personalizado", "qualquer tema",   
-        "sacolinhas pvc", "pegue monte", "caixas personalizadas", "lembrancinha premium", "15 anos"  
+        "sacolinhas pvc", "pegue monte", "caixas personalizadas", "lembrancinha premium", "15 anos",
+        "topo de bolo", "docinho", "balão", "painel de festa", "convite personalizado"
     ],  
     "🏠 Casa, Cozinha & Utensílios": [  
-        "cozinha", "casa", "utilidades", "organizador", "eletrodomesticos", "decoração"  
+        "cozinha", "casa", "utilidades", "organizador", "eletrodomesticos", "decoração",
+        "utensílios de cozinha", "potes herméticos", "cesto organizador", "tapete", "cortina"
     ],  
     "👗 Moda Feminina & Acessórios": [  
-        "moda feminina", "bolsas", "acessórios", "vestido", "bijuterias"  
+        "moda feminina", "bolsas", "acessórios", "vestido", "bijuterias", "óculos de sol",
+        "relógio feminino", "sandália feminina", "conjunto feminino"
     ],  
+    "👕 Moda Masculina": [
+        "moda masculina", "camisa masculina", "bermuda", "tênis masculino", "relógio masculino",
+        "bone", "cinto masculino"
+    ],
     "💄 Beleza & Cuidados": [  
-        "maquiagem", "skincare", "cabelos", "perfume", "unhas"  
+        "maquiagem", "skincare", "cabelos", "perfume", "unhas", "escova de cabelo",
+        "protetor solar", "hidratante", "batom"
     ],  
     "🧸 Brinquedos & Infantil": [  
-        "brinquedos", "jogos educativos", "maternidade", "infantil"  
+        "brinquedos", "jogos educativos", "maternidade", "infantil", "boneca", "carrinho de brinquedo",
+        "quebra cabeça", "brinquedo bebê"
     ],  
+    "👶 Bebês": [
+        "fralda", "mamadeira", "carrinho de bebê", "roupinha bebê", "chupeta", "banheira bebê"
+    ],
+    "📱 Eletrônicos & Celulares": [
+        "capinha de celular", "fone de ouvido", "carregador", "power bank", "smartwatch",
+        "película de vidro", "suporte de celular"
+    ],
+    "💻 Informática": [
+        "mouse", "teclado", "webcam", "pendrive", "cabo usb", "hub usb"
+    ],
+    "🛠️ Ferramentas & Construção": [
+        "ferramentas", "furadeira", "chave de fenda", "trena", "parafusadeira"
+    ],
+    "🚗 Automotivo": [
+        "acessórios carro", "capa de banco", "som automotivo", "aromatizante carro", "suporte veicular"
+    ],
+    "⚽ Esporte & Lazer": [
+        "roupa fitness", "garrafa térmica", "corda de pular", "faixa elástica", "bicicleta acessórios"
+    ],
+    "🐶 Pet Shop": [
+        "ração", "brinquedo pet", "coleira", "casinha de cachorro", "areia de gato"
+    ],
+    "📚 Papelaria & Escritório": [
+        "caderno", "caneta", "mochila escolar", "estojo", "organizador de mesa"
+    ],
+    "🎮 Games": [
+        "controle de video game", "acessórios ps4", "acessórios ps5", "headset gamer"
+    ],
+    "💊 Saúde & Suplementos": [
+        "whey protein", "vitamina", "termômetro", "máscara facial", "suplemento"
+    ],
     "🌐 Busca Livre Geral (Todas as Categorias da Shopee)": [  
         "promoção", "desconto", "oferta", "achadinhos", "utilidades"  
     ]  
@@ -170,14 +269,46 @@ PALAVRAS_IGNORAR = {
     "com", "sem", "de", "da", "do", "para", "pra", "e", "ou", "un", "peça", "pecas",  
 }  
 
-def normalizar_produto(nome: str) -> str:  
-    if not nome:  
-        return ""  
-    texto = nome.lower()  
+def _singularizar(palavra: str) -> str:
+    """Normalização simples de plural em português (heurística, não é gramática perfeita,
+    mas resolve a maioria dos casos tipo 'copos'->'copo', 'sacolas'->'sacola')."""
+    if len(palavra) > 4 and palavra.endswith("ns"):
+        return palavra[:-2] + "m"
+    if len(palavra) > 4 and palavra.endswith("res"):
+        return palavra[:-2]
+    if len(palavra) > 4 and palavra.endswith("s") and not palavra.endswith("ss"):
+        return palavra[:-1]
+    return palavra
+
+
+def normalizar_produto(nome: str) -> frozenset:
+    """Gera um CONJUNTO de palavras-chave do produto (não mais uma string fixa),
+    ignorando números/quantidades e normalizando plural, pra permitir comparar
+    por SIMILARIDADE (não precisa ser 100% idêntico pra contar como duplicata)."""
+    if not nome:
+        return frozenset()
+    texto = nome.lower()
     texto = re.sub(r"\d+[/\d]*", " ", texto)  # remove qualquer número/sequência (05/25/50, 100, etc.)
-    texto = re.sub(r"[^\w\sáàâãéêíóôõúüç]", " ", texto)  
-    palavras = [p for p in texto.split() if p not in PALAVRAS_IGNORAR and len(p) > 2]  
-    return " ".join(sorted(set(palavras[:8])))  
+    texto = re.sub(r"[^\w\sáàâãéêíóôõúüç]", " ", texto)
+    palavras = {_singularizar(p) for p in texto.split() if p not in PALAVRAS_IGNORAR and len(p) > 2}
+    return frozenset(palavras)
+
+
+def produtos_sao_parecidos(a: frozenset, b: frozenset, limiar: float = 0.55) -> bool:
+    """Compara dois produtos por similaridade de Jaccard (interseção/união das
+    palavras). limiar=0.55 significa que precisa ter mais da metade das
+    palavras em comum pra contar como 'mesmo produto'."""
+    if not a or not b:
+        return False
+    intersecao = len(a & b)
+    if intersecao == 0:
+        return False
+    uniao = len(a | b)
+    return (intersecao / uniao) >= limiar
+
+
+def produto_ja_visto(produto_key: frozenset, lista_vistos: list, limiar: float = 0.55) -> bool:
+    return any(produtos_sao_parecidos(produto_key, visto, limiar) for visto in lista_vistos)
 
 def carregar_historico() -> dict:  
     if os.path.exists(HISTORICO_FILE):  
@@ -201,8 +332,15 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
                     filtrar_desconto: bool, min_desconto: float,  
                     min_preco: float, max_preco: float):  
     links_usados = set(historico["links"]) if usar_historico else set()  
-    produtos_usados = set(historico["produtos"]) if usar_historico else set()  
-    produtos_nesta_rodada = set()  
+    # compatibilidade: histórico antigo guardava string, o novo guarda lista de palavras
+    produtos_usados = []
+    if usar_historico:
+        for p in historico["produtos"]:
+            if isinstance(p, str):
+                produtos_usados.append(frozenset(p.split()))
+            else:
+                produtos_usados.append(frozenset(p))
+    produtos_nesta_rodada = []  
     
     filtradas = []  
     descartes_historico = 0  
@@ -247,11 +385,11 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
             continue  
             
         if usar_historico:  
-            if link in links_usados or (produto_key and (produto_key in produtos_usados or produto_key in produtos_nesta_rodada)):  
+            if link in links_usados or produto_ja_visto(produto_key, produtos_usados) or produto_ja_visto(produto_key, produtos_nesta_rodada):  
                 descartes_historico += 1  
                 continue  
         
-        produtos_nesta_rodada.add(produto_key)  
+        produtos_nesta_rodada.append(produto_key)  
         filtradas.append(oferta)  
         
     filtradas.sort(key=lambda o: float(o.get("priceDiscountRate") or 0), reverse=True)  
@@ -498,7 +636,8 @@ modo_busca = st.sidebar.radio(
         "✍️ Digitar Palavras-Chave Específicas",  
         "🔀 Combinar Categorias + Palavras-Chave",  
         "🌐 Busca Livre Geral (Sem restrição)"  
-    ]  
+    ],
+    key="k_modo_busca"
 )  
 
 categorias_selecionadas = []  
@@ -508,14 +647,14 @@ if modo_busca in ["🏷️ Usar Categorias da Shopee", "🔀 Combinar Categorias
     categorias_selecionadas = st.sidebar.multiselect(  
         "Selecione as Categorias da Shopee:",  
         list(CATEGORIAS_MAP.keys()),  
-        default=["🎈 Festas, Lembrancinhas & Personalizados", "🏠 Casa, Cozinha & Utensílios"]  
+        key="k_categorias"
     )  
 
 if modo_busca in ["✍️ Digitar Palavras-Chave Específicas", "🔀 Combinar Categorias + Palavras-Chave"]:  
     keywords_digitadas = st.sidebar.text_input(  
         "Digite as Palavras-chave (separadas por vírgula):",  
-        value="qualquer tema, sacolinhas pvc, pegue monte, lembrancinha",  
-        help="Digite exatamente como você costuma pesquisar no aplicativo da Shopee."  
+        help="Digite exatamente como você costuma pesquisar no aplicativo da Shopee.",
+        key="k_keywords"
     )  
 
 st.sidebar.markdown("---")  
@@ -527,7 +666,8 @@ opcao_ordem = st.sidebar.selectbox(
         "Relevância (Igual à pesquisa do site da Shopee)",  
         "Mais Vendidos / Populares",  
         "Maior Taxa de Comissão"  
-    ]  
+    ],
+    key="k_ordem"
 )  
 
 sort_type_map = {  
@@ -541,8 +681,8 @@ qtd_por_keyword = st.sidebar.number_input(
     "Quantidade de Ofertas por Termo:",  
     min_value=5,  
     max_value=200,  
-    value=30,  
-    step=5  
+    step=5,
+    key="k_qtd_termo"
 )  
 
 st.sidebar.markdown("---")  
@@ -555,31 +695,31 @@ tipos_loja = st.sidebar.multiselect(
         "Lojas Oficiais (Shopee Oficial)",  
         "Lojas Indicadas (Shopee Indicado)"  
     ],  
-    default=["Todas as Lojas (Recomendado - Maior volume)"]  
+    key="k_tipos_loja"
 )  
 
-min_vendas = st.sidebar.number_input("Vendas Mínimas do Produto", value=0, step=5)  
+min_vendas = st.sidebar.number_input("Vendas Mínimas do Produto", step=5, key="k_min_vendas")  
 
 col_p1, col_p2 = st.sidebar.columns(2)  
 with col_p1:  
-    min_price = st.number_input("Preço Mínimo (R$)", value=0.0, step=5.0)  
+    min_price = st.number_input("Preço Mínimo (R$)", step=5.0, key="k_min_price")  
 with col_p2:  
-    max_price = st.number_input("Preço Máximo (R$ 0 = sem limite)", value=0.0, step=10.0)  
+    max_price = st.number_input("Preço Máximo (R$ 0 = sem limite)", step=10.0, key="k_max_price")  
 
 st.sidebar.markdown("---")  
 st.sidebar.header("🎯 Histórico e Filtros")  
 
-usar_historico = st.sidebar.checkbox("Ignorar Ofertas Já Buscadas Antes (Histórico)", value=True)  
+usar_historico = st.sidebar.checkbox("Ignorar Ofertas Já Buscadas Antes (Histórico)", key="k_usar_historico")  
 
 if st.sidebar.button("🧹 Limpar Histórico do Servidor"):  
     limpar_historico_arquivo()  
     st.sidebar.success("Histórico zerado com sucesso!")  
 
-filtrar_desconto = st.sidebar.checkbox("Filtrar por Desconto Mínimo", value=False)  
-min_desconto = st.sidebar.slider("Desconto Mínimo (%)", 5, 90, 20) if filtrar_desconto else 0  
+filtrar_desconto = st.sidebar.checkbox("Filtrar por Desconto Mínimo", key="k_filtrar_desconto")  
+min_desconto = st.sidebar.slider("Desconto Mínimo (%)", 5, 90, key="k_min_desconto") if filtrar_desconto else 0  
 
-filtrar_comissao = st.sidebar.checkbox("Filtrar por Comissão Mínima", value=False)  
-min_comissao = st.sidebar.slider("Comissão Mínima (%)", 1.0, 30.0, 8.0) if filtrar_comissao else 0  
+filtrar_comissao = st.sidebar.checkbox("Filtrar por Comissão Mínima", key="k_filtrar_comissao")  
+min_comissao = st.sidebar.slider("Comissão Mínima (%)", 1.0, 30.0, key="k_min_comissao") if filtrar_comissao else 0  
 
 st.sidebar.markdown("---")  
 st.sidebar.header("✍️ Tom e Estilo da Mensagem")  
@@ -592,34 +732,33 @@ estilo_prompt = st.sidebar.selectbox(
         "Oportunidade imperdível (foco em economia)",  
         "Emocionada / Reação de surpresa com o preço",  
         "Direta e objetiva (sem enrolação)",  
-    ]  
+    ],
+    key="k_estilo_prompt"
 )  
 
 st.sidebar.markdown("---")
 st.sidebar.header("🗓️ Campanha específica (opcional)")
-campanha_ativa = st.sidebar.checkbox("Mencionar uma data/campanha específica nas frases?", value=False)
+campanha_ativa = st.sidebar.checkbox("Mencionar uma data/campanha específica nas frases?", key="k_campanha_ativa")
 campanha_texto = ""
 if campanha_ativa:
     dia_duplo = st.sidebar.text_input(
         "Qual data/campanha? (ex: 9.9, 10.10, 11.11, Black Friday)",
-        value="",
-        placeholder="ex: 9.9"
+        placeholder="ex: 9.9",
+        key="k_dia_duplo"
     )
     if dia_duplo.strip():
         campanha_texto = f"campanha do dia {dia_duplo.strip()}"
 
-mencionar_cupom = st.sidebar.checkbox("Mencionar cupom nas frases?", value=False)
+mencionar_cupom = st.sidebar.checkbox("Mencionar cupom nas frases?", key="k_mencionar_cupom")
 
 tamanho_lote_gemini = st.sidebar.slider(
     "Ofertas por chamada ao Gemini (lote)",
-    min_value=5, max_value=25, value=10,
-    help="Números maiores = menos chamadas à API = mais rápido e mais barato. Se notar frases de baixa qualidade, diminua."
+    min_value=5, max_value=25,
+    help="Números maiores = menos chamadas à API = mais rápido e mais barato. Se notar frases de baixa qualidade, diminua.",
+    key="k_tamanho_lote"
 )
 
 # Conteúdo Principal  
-
-if "resultados" not in st.session_state:  
-    st.session_state.resultados = []  
 
 if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=True):  
     if not app_id or not app_secret or not gemini_key:  
@@ -652,6 +791,7 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         total_bruto_acumulado = 0  
         total_descarte_hist = 0  
         total_descarte_loja = 0  
+        diagnostico_por_termo = []
         
         for index, kw in enumerate(buscas):  
             status_text.text(f"Buscando {qtd_por_keyword} ofertas para termo: '{kw}' (Modo: {opcao_ordem})...")  
@@ -670,6 +810,16 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
             total_bruto_acumulado += stats["total_bruto"]  
             total_descarte_hist += stats["descartes_historico"]  
             total_descarte_loja += stats["descartes_loja"]  
+            diagnostico_por_termo.append({
+                "Termo buscado": kw,
+                "Encontradas na Shopee": stats["total_bruto"],
+                "Passaram nos filtros": stats["passaram"],
+                "Descartadas (já usadas antes)": stats["descartes_historico"],
+                "Descartadas (loja)": stats["descartes_loja"],
+                "Descartadas (preço)": stats["descartes_preco"],
+                "Descartadas (vendas)": stats["descartes_vendas"],
+                "Erro": erro_busca or "",
+            })
             progresso.progress((index + 1) / total_buscas)  
         
         status_text.text("Gerando frases personalizadas com o Gemini AI...")  
@@ -701,7 +851,8 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
                     "texto_final": texto_final,
                     "whatsapp_url": whatsapp_url,
                     "link": link,
-                    "selecionado": True
+                    "selecionado": True,
+                    "enviada": False
                 })
 
                 novos_links.append(link)
@@ -716,12 +867,34 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         
         if usar_historico and resultados_gerados:  
             historico["links"] = list(set(historico["links"]) | set(novos_links))  
-            historico["produtos"] = list(set(historico["produtos"]) | set(novos_produtos))  
+            # produtos agora são frozensets (conjuntos de palavras) — convertemos
+            # pra listas de listas, que é o que o JSON consegue guardar.
+            produtos_existentes = []
+            for p in historico["produtos"]:
+                if isinstance(p, str):
+                    produtos_existentes.append(frozenset(p.split()))
+                else:
+                    produtos_existentes.append(frozenset(p))
+            produtos_combinados = produtos_existentes + [p for p in novos_produtos if p]
+            # remove duplicatas exatas (mesma frozenset) mantendo a ordem
+            vistos_exatos = set()
+            produtos_unicos = []
+            for p in produtos_combinados:
+                if p not in vistos_exatos:
+                    vistos_exatos.add(p)
+                    produtos_unicos.append(list(p))
+            historico["produtos"] = produtos_unicos
             historico["frases"] = list(set(historico["frases"]) | set(novas_frases))  
             salvar_historico(historico)  
         
         st.session_state.resultados = resultados_gerados  
+        st.session_state.diagnostico = diagnostico_por_termo
         status_text.success(f"Concluído! {len(resultados_gerados)} ofertas geradas de um total de {total_bruto_acumulado} produtos analisados na Shopee.")  
+
+if st.session_state.get("diagnostico"):
+    with st.expander("🔍 Ver detalhamento por termo de busca (diagnóstico)"):
+        st.caption("Use isso pra ver exatamente o que cada termo/categoria retornou e por que algo pode ter sido descartado.")
+        st.dataframe(st.session_state.diagnostico, use_container_width=True)  
 
 # Exibição dos Resultados  
 
@@ -802,18 +975,55 @@ if st.session_state.resultados:
             st.markdown("---")  
 
     with tab_fila:  
-        st.info(f"💡 **Ofertas Selecionadas: {len(selecionados)}**. Clique no botão de disparo de cada oferta sequencialmente se preferir enviá-las em mensagens isoladas no WhatsApp.")  
+        st.info("💡 Envie uma oferta por vez, na ordem — depois de mandar no WhatsApp, marque como enviada pra ir pra próxima automaticamente. Isso fica salvo mesmo se você sair do app e voltar.")
+
         if not selecionados:  
             st.warning("Nenhuma oferta selecionada.")  
         else:  
-            for s_idx, item in enumerate(selecionados):  
-                nome = item["oferta"].get("productName", "Produto")  
-                col1, col2 = st.columns([3, 1])  
-                with col1:  
-                    st.write(f"**Oferta {s_idx + 1}:** {nome[:60]}...")  
-                with col2:  
-                    st.link_button(f"🚀 Disparar Oferta #{s_idx + 1}", item["whatsapp_url"], use_container_width=True)  
-                st.divider()  
+            # Garante que cada item tenha o campo "enviada" (compatibilidade com resultados antigos)
+            for item in selecionados:
+                item.setdefault("enviada", False)
+
+            enviadas = [item for item in selecionados if item["enviada"]]
+            pendentes = [item for item in selecionados if not item["enviada"]]
+
+            st.progress(len(enviadas) / len(selecionados) if selecionados else 0)
+            st.markdown(f"**{len(enviadas)} de {len(selecionados)} enviadas**")
+
+            if pendentes:
+                atual = pendentes[0]
+                nome = atual["oferta"].get("productName", "Produto")
+                st.markdown("### 📲 Próxima da fila:")
+                st.write(f"**{nome[:80]}**")
+                st.code(atual["texto_final"], language=None)
+
+                col_env1, col_env2 = st.columns(2)
+                with col_env1:
+                    st.link_button("🚀 Abrir no WhatsApp", atual["whatsapp_url"], use_container_width=True, type="primary")
+                with col_env2:
+                    if st.button("✅ Marcar como enviada e ir pra próxima", use_container_width=True):
+                        atual["enviada"] = True
+                        salvar_sessao_disco()
+                        st.rerun()
+            else:
+                st.success("🎉 Todas as ofertas selecionadas já foram marcadas como enviadas!")
+
+            with st.expander("Ver fila completa"):
+                for s_idx, item in enumerate(selecionados):
+                    nome = item["oferta"].get("productName", "Produto")
+                    status = "✅" if item["enviada"] else "⏳"
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"{status} **#{s_idx + 1}:** {nome[:60]}...")
+                    with col2:
+                        st.link_button("Disparar", item["whatsapp_url"], use_container_width=True, key=f"disparo_{item['id']}")
+                    st.divider()
+
+            if st.button("🔄 Reiniciar fila (desmarcar todas como enviadas)"):
+                for item in selecionados:
+                    item["enviada"] = False
+                salvar_sessao_disco()
+                st.rerun()
 
     with tab_exportar:  
         if selecionados:  
@@ -830,3 +1040,9 @@ if st.session_state.resultados:
 
 else:  
     st.info("Ajuste os filtros na barra lateral e clique no botão '🚀 Buscar Novas Ofertas' para iniciar.")  
+
+# Salva a sessão inteira em disco toda vez que o script roda — é isso que
+# garante que, mesmo se a aba recarregar (ex: trocar de app no celular),
+# ao voltar tudo reaparece do jeito que você deixou.
+salvar_sessao_disco()
+
