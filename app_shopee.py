@@ -31,6 +31,7 @@ DEFAULTS_SESSAO = {
     "k_modo_busca": "🏷️ Usar Categorias da Shopee",
     "k_categorias": ["🎈 Festas, Lembrancinhas & Personalizados", "🏠 Casa, Cozinha & Utensílios"],
     "k_keywords": "qualquer tema, sacolinhas pvc, pegue monte, lembrancinha",
+    "k_excluir_palavras": "",
     "k_ordem": "Relevância (Igual à pesquisa do site da Shopee)",
     "k_qtd_termo": 30,
     "k_tipos_loja": ["Todas as Lojas (Recomendado - Maior volume)"],
@@ -330,7 +331,8 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
                     tipos_loja_selecionados: list, min_vendas: int,  
                     filtrar_comissao: bool, min_comissao: float,  
                     filtrar_desconto: bool, min_desconto: float,  
-                    min_preco: float, max_preco: float):  
+                    min_preco: float, max_preco: float,
+                    palavras_excluidas: list = None):  
     links_usados = set(historico["links"]) if usar_historico else set()  
     # compatibilidade: histórico antigo guardava string, o novo guarda lista de palavras
     produtos_usados = []
@@ -347,15 +349,22 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
     descartes_preco = 0  
     descartes_loja = 0  
     descartes_vendas = 0  
+    descartes_excluidos = 0
+    palavras_excluidas = palavras_excluidas or []
     
     for oferta in ofertas:  
         comissao = float(oferta.get("commissionRate") or 0) * 100  
         desconto = float(oferta.get("priceDiscountRate") or 0)  
         link = oferta.get("offerLink", "")  
         produto_key = normalizar_produto(oferta.get("productName", ""))  
+        nome_lower = (oferta.get("productName") or "").lower()
         preco = float(oferta.get("price") or oferta.get("priceMin") or 0)  
         vendas = int(oferta.get("sales") or 0)  
         loja_tipos = obter_tipos_loja(oferta)  
+
+        if palavras_excluidas and any(p in nome_lower for p in palavras_excluidas):
+            descartes_excluidos += 1
+            continue
         
         # Correção no filtro de tipo de loja para aceitar variações do rótulo  
         passou_loja = False  
@@ -399,7 +408,8 @@ def filtrar_ofertas(ofertas, historico: dict, usar_historico: bool,
         "descartes_historico": descartes_historico,  
         "descartes_preco": descartes_preco,  
         "descartes_loja": descartes_loja,  
-        "descartes_vendas": descartes_vendas  
+        "descartes_vendas": descartes_vendas,
+        "descartes_excluidos": descartes_excluidos
     }  
     return filtradas, stats  
 
@@ -417,11 +427,28 @@ TONS_CONFIG = {
             "Carinho e cuidado, tipo 'lembrei de você quando vi isso'",
         ],
     },
-    "Urgência / Poucas unidades restantes": {
-        "foco": "urgência real, poucas unidades, sensação de que pode acabar a qualquer momento",
+    "Conselho de Amiga (recomendação pessoal)": {
+        "foco": "conselho sincero de quem já testou ou confia, tom de quem quer o bem da outra pessoa, sem parecer venda",
         "angulos": [
-            "Urgência e velocidade, achadinho que pode esgotar",
+            "Conselho direto de amiga: 'olha, eu compraria isso sem pensar duas vezes'",
+            "Recomendação de quem se preocupa e quer ajudar a economizar/acertar na escolha",
+            "Tom de quem já passou pela mesma necessidade e quer indicar a solução",
+        ],
+    },
+    "Urgência / Imediatismo (aja agora)": {
+        "foco": "urgência real, poucas unidades, sensação de que precisa decidir AGORA",
+        "angulos": [
+            "Urgência e velocidade, achadinho que pode esgotar a qualquer momento",
             "Correria genuína, tipo 'corre que já era quando eu vi'",
+            "Pressão de tempo real, sem soar artificial ou exagerada",
+        ],
+    },
+    "Persuasiva / Gatilhos Mentais": {
+        "foco": "persuasão com gatilhos mentais reais (escassez, prova social, curiosidade) — soar convincente e estratégico, não robótico",
+        "angulos": [
+            "Gatilho de prova social, tipo 'todo mundo tá comprando isso agora'",
+            "Gatilho de curiosidade, que deixa a pessoa querendo saber mais antes de clicar",
+            "Gatilho de escassez combinado com benefício claro e direto",
         ],
     },
     "Festa Infantil & Maternidade (dica de amiga)": {
@@ -446,9 +473,10 @@ TONS_CONFIG = {
         ],
     },
     "Direta e objetiva (sem enrolação)": {
-        "foco": "direto ao ponto, sem enrolação, sem apelo emocional forçado",
+        "foco": "direto ao ponto, sem enrolação, sem apelo emocional forçado, frase quase informativa mas simpática",
         "angulos": [
-            "Frase direta e curta, sem rodeios, quase informativa mas simpática",
+            "Frase direta e curta, sem rodeios",
+            "Informativa e prática, vai direto no benefício",
         ],
     },
 }
@@ -458,10 +486,38 @@ def _config_do_tom(estilo_prompt: str) -> dict:
     return TONS_CONFIG.get(estilo_prompt, TONS_CONFIG["Amiga / Achadinho (padrão, caloroso e natural)"])
 
 
-def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: str, frases_recentes: list, campanha_texto: str, mencionar_cupom: bool) -> list:
+def _chamar_gemini_com_retry(gemini_client, mod: str, prompt: str, tentativas: int = 2, json_mode: bool = True):
+    """Tenta chamar o mesmo modelo mais de uma vez antes de desistir —
+    evita cair no fallback genérico só porque bateu um limite momentâneo
+    de requisições (comum na cota gratuita do Gemini)."""
+    ultimo_erro = None
+    config = {"temperature": 1.25}
+    if json_mode:
+        config["response_mime_type"] = "application/json"
+    for tentativa in range(tentativas):
+        try:
+            return gemini_client.models.generate_content(
+                model=mod,
+                contents=prompt,
+                config=config,
+            ), None
+        except Exception as e:
+            ultimo_erro = str(e)
+            if "429" in ultimo_erro or "quota" in ultimo_erro.lower() or "rate" in ultimo_erro.lower():
+                time.sleep(1.5 * (tentativa + 1))  # espera crescente antes de tentar de novo
+                continue
+            break  # erro que não é de limite de requisição, não adianta tentar de novo no mesmo modelo
+    return None, ultimo_erro
+
+
+def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: str, frases_recentes: list, campanha_texto: str, mencionar_cupom: bool) -> tuple:
     """Gera UMA frase pra cada oferta do lote, mas numa ÚNICA chamada ao Gemini
     (bem mais rápido e mais barato que uma chamada por oferta). Pede o
     resultado em JSON e valida antes de aceitar.
+
+    Retorna (lista_de_frases, usou_fallback: bool) — o segundo valor serve
+    pra você saber se a IA realmente gerou as frases ou se caiu no pool
+    estático genérico (normalmente sinal de cota do Gemini estourada).
 
     campanha_texto: contexto de campanha específico (ex: "campanha do dia 9.9")
     — deixe vazio para mensagens genéricas, sem menção a data nenhuma.
@@ -469,24 +525,34 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     config_tom = _config_do_tom(estilo_prompt)
     angulo_escolhido = random.choice(config_tom["angulos"])
 
+    # Agora passamos o NOME real do produto pro Gemini conseguir analisar o
+    # contexto (pra quê serve, tipo de item) e escrever algo específico —
+    # só que ele é proibido de escrever esse nome de volta na frase.
     itens_prompt = "\n".join(
-        f"{i+1}. Preço R$ {o.get('price') or o.get('priceMin') or '?'}, desconto {o.get('priceDiscountRate', 0)}%"
+        f"{i+1}. Produto (só pra você entender o contexto, NÃO repita esse nome): "
+        f"\"{(o.get('productName') or 'item')[:100]}\" | Preço R$ {o.get('price') or o.get('priceMin') or '?'} | Desconto {o.get('priceDiscountRate', 0)}%"
         for i, o in enumerate(ofertas_lote)
     )
 
     bloco_recentes = ""
     if frases_recentes:
-        ultimas = frases_recentes[-15:]
-        bloco_recentes = "Frases já usadas — NÃO repita nenhuma estrutura parecida com estas:\n"
+        ultimas = frases_recentes[-20:]
+        bloco_recentes = "Frases já usadas em rodadas anteriores — NÃO repita nada parecido com estas:\n"
         bloco_recentes += "\n".join(f"- {f}" for f in ultimas)
 
     linha_contexto = f"Contexto da campanha: {campanha_texto}." if campanha_texto.strip() else "Sem campanha ou data específica — mensagem genérica, atemporal, sem mencionar nenhuma data."
     linha_cupom = "Pode mencionar cupom quando fizer sentido." if mencionar_cupom else "NÃO mencione cupom em nenhuma frase."
 
     prompt = f"""
-    Você é a Carla Barce (influencer de festas, casa e achadinhos no WhatsApp).
-    Preciso de {len(ofertas_lote)} frases CURTAS e IMPERDÍVEIS, uma para cada
-    item da lista abaixo (na mesma ordem).
+    Você é a Carla Barce (influencer de festas, casa e achadinhos no WhatsApp),
+    conhecida por escrever mensagens que parecem 100% humanas, específicas e
+    nunca genéricas — cada seguidora sente que aquela mensagem foi pensada
+    especialmente pra aquele produto.
+
+    Preciso de {len(ofertas_lote)} frases DIFERENTES ENTRE SI, uma para cada
+    item da lista abaixo (na mesma ordem). ANALISE o que cada produto é/serve
+    pra escrever algo ESPECÍFICO sobre a utilidade, ocasião de uso ou benefício
+    dele — sem nunca escrever o nome do produto.
 
     {linha_contexto}
     {linha_cupom}
@@ -497,32 +563,29 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     {bloco_recentes}
 
     REGRAS ESTRITAS E OBRIGATÓRIAS:
-    1. JAMAIS mencione nome de produto.
-    2. Cada frase começa de um jeito DIFERENTE das outras — sem repetir "Gente, olha" em mais de uma.
-    3. Tom obrigatório: {config_tom['foco']}. Ângulo de inspiração: {angulo_escolhido}.
-    4. 1 a 2 emojis por frase, coerentes com o tom pedido (nada de emoji de "correria" se o tom for calmo).
-    5. No máximo 10 a 14 palavras por frase.
-    6. Responda APENAS com um JSON no formato: {{"frases": ["frase 1", "frase 2", ...]}}
+    1. JAMAIS escreva o nome literal do produto — mas USE o que ele é pra tornar a frase específica (ex: se for algo de cozinha, fale de praticidade na cozinha; se for de festa, fale do momento da festa; etc.), sem citar o item por nome.
+    2. As {len(ofertas_lote)} frases desta lista devem ser TODAS diferentes entre si — em estrutura, abertura e vocabulário. Proibido repetir a mesma frase ou frases quase idênticas dentro do lote.
+    3. Nenhuma frase pode soar genérica ou "copiada e colada" — cada uma tem que parecer escrita pensando naquele produto específico.
+    4. Tom obrigatório: {config_tom['foco']}. Ângulo de inspiração: {angulo_escolhido}.
+    5. 1 a 2 emojis por frase, coerentes com o tom pedido.
+    6. No máximo 10 a 16 palavras por frase.
+    7. Responda APENAS com um JSON no formato: {{"frases": ["frase 1", "frase 2", ...]}}
        Sem markdown, sem explicação, sem texto fora do JSON.
     """
 
     modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
     for mod in modelos:
+        response, erro = _chamar_gemini_com_retry(gemini_client, mod, prompt)
+        if response is None or not response.text:
+            continue
         try:
-            response = gemini_client.models.generate_content(
-                model=mod,
-                contents=prompt,
-                config={"temperature": 1.15, "response_mime_type": "application/json"},
-            )
-            if not response or not response.text:
-                continue
             texto = response.text.strip()
             texto = re.sub(r"^```json|```$", "", texto).strip()
             dados = json.loads(texto)
             frases = dados.get("frases", [])
             if len(frases) >= len(ofertas_lote):
-                return [f.strip() for f in frases[:len(ofertas_lote)]]
+                return [f.strip() for f in frases[:len(ofertas_lote)]], False
         except Exception:
             continue
 
@@ -530,8 +593,9 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     # cai pro método individual item a item, que é mais lento mas mais robusto.
     resultado = []
     for oferta in ofertas_lote:
-        resultado.append(gerar_frase_gemini(gemini_client, oferta, estilo_prompt, frases_recentes + resultado, campanha_texto, mencionar_cupom))
-    return resultado
+        frase = gerar_frase_gemini(gemini_client, oferta, estilo_prompt, frases_recentes + resultado, campanha_texto, mencionar_cupom)
+        resultado.append(frase)
+    return resultado, True
 
 
 def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recentes: list, campanha_texto: str = "", mencionar_cupom: bool = False) -> str:  
@@ -552,11 +616,13 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
     linha_contexto = f"Contexto da campanha: {campanha_texto}." if campanha_texto.strip() else "Sem campanha ou data específica — mensagem genérica, atemporal, sem mencionar nenhuma data."
     linha_cupom = "Pode mencionar cupom quando fizer sentido." if mencionar_cupom else "NÃO mencione cupom."
 
-    prompt = f"""  
-    Você é a Carla Barce (influencer de festas, casa e achadinhos de ofertas no WhatsApp).  
-    Crie UMA ÚNICA FRASE CURTA, IMPERDÍVEL E MUITO NATURAL para mandar no seu grupo.  
+    nome_produto = (oferta.get("productName") or "item")[:100]
 
-    Dados da promoção:  
+    prompt = f"""  
+    Você é a Carla Barce (influencer de festas, casa e achadinhos de ofertas no WhatsApp),
+    conhecida por escrever mensagens específicas, nunca genéricas.
+
+    Produto (só pra você entender o contexto — NÃO repita esse nome na frase): "{nome_produto}"
     - Preço: R$ {preco}  
     - Desconto: {desconto}%  
     - Tom obrigatório: {config_tom['foco']}. Ângulo de inspiração: {angulo_escolhido}.
@@ -565,30 +631,27 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
 
     {bloco_recentes}  
 
+    Crie UMA ÚNICA FRASE CURTA, IMPERDÍVEL E ESPECÍFICA (use o que o produto É/serve pra deixar a frase específica, sem citar o nome dele).
+
     REGRAS ESTRITAS E OBRIGATÓRIAS:  
     1. JAMAIS mencione o nome do produto. NUNCA coloque o nome do item no texto.  
     2. JAMAIS comece com "Gente, olha essa oferta" ou "Gente, olha só". Alterne completamente o início da frase.  
     3. Respeite rigorosamente o tom obrigatório acima — nada de linguagem de outro tom.
-    4. Use de 1 a 2 emojis alegres e coerentes com o tom pedido.  
-    5. Mantenha o texto CURTO (no máximo 10 a 14 palavras) para leitura instantânea.  
-    6. Responda APENAS com a frase final, sem aspas, sem explicações e sem introduções.  
+    4. Não pode soar genérica — precisa parecer escrita pensando neste produto específico.
+    5. Use de 1 a 2 emojis alegres e coerentes com o tom pedido.  
+    6. Mantenha o texto CURTO (no máximo 10 a 16 palavras) para leitura instantânea.  
+    7. Responda APENAS com a frase final, sem aspas, sem explicações e sem introduções.  
     """  
 
     modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]  
     
     for mod in modelos:  
-        try:  
-            response = gemini_client.models.generate_content(  
-                model=mod,  
-                contents=prompt,  
-                config={"temperature": 1.15},  # eleva a variação das respostas  
-            )  
-            if response and response.text:  
-                res = response.text.strip().replace("\n", " ").replace('"', '')  
-                if len(res) > 5 and not res.lower().startswith("gente, olha") and res not in frases_recentes:  
-                    return res  
-        except Exception:  
-            continue  
+        response, erro = _chamar_gemini_com_retry(gemini_client, mod, prompt, json_mode=False)
+        if response is None or not response.text:
+            continue
+        res = response.text.strip().replace("\n", " ").replace('"', '')  
+        if len(res) > 5 and not res.lower().startswith("gente, olha") and res not in frases_recentes:  
+            return res  
 
     # Fallback: garante que não repete nem no pool estático, e evita
     # linguagem de correria/urgência se o tom escolhido não pedir isso
@@ -656,6 +719,13 @@ if modo_busca in ["✍️ Digitar Palavras-Chave Específicas", "🔀 Combinar C
         help="Digite exatamente como você costuma pesquisar no aplicativo da Shopee.",
         key="k_keywords"
     )  
+
+excluir_palavras_texto = st.sidebar.text_input(
+    "🚫 Excluir produtos que contenham (separadas por vírgula):",
+    help="Ex: digitar 'sacola' remove qualquer produto cujo nome contenha essa palavra, mesmo que o termo buscado seja diferente.",
+    key="k_excluir_palavras"
+)
+palavras_excluidas = [p.strip().lower() for p in excluir_palavras_texto.split(",") if p.strip()]
 
 st.sidebar.markdown("---")  
 st.sidebar.header("🔍 Ordenação da Busca na Shopee")  
@@ -804,7 +874,8 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
                 tipos_loja, min_vendas,  
                 filtrar_comissao, min_comissao,  
                 filtrar_desconto, min_desconto,  
-                min_price, max_price  
+                min_price, max_price,
+                palavras_excluidas
             )  
             todas_ofertas_filtradas.extend(boas)  
             total_bruto_acumulado += stats["total_bruto"]  
@@ -818,6 +889,7 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
                 "Descartadas (loja)": stats["descartes_loja"],
                 "Descartadas (preço)": stats["descartes_preco"],
                 "Descartadas (vendas)": stats["descartes_vendas"],
+                "Descartadas (palavra excluída)": stats["descartes_excluidos"],
                 "Erro": erro_busca or "",
             })
             progresso.progress((index + 1) / total_buscas)  
@@ -833,9 +905,14 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         total_boas = len(todas_ofertas_filtradas)  
         
         idx_global = 0
+        lotes_com_fallback = 0
+        total_lotes = 0
         for inicio in range(0, total_boas, tamanho_lote_gemini):
             lote = todas_ofertas_filtradas[inicio:inicio + tamanho_lote_gemini]
-            frases_do_lote = gerar_frases_lote_gemini(gemini_client, lote, estilo_prompt, novas_frases, campanha_texto, mencionar_cupom)
+            frases_do_lote, usou_fallback = gerar_frases_lote_gemini(gemini_client, lote, estilo_prompt, novas_frases, campanha_texto, mencionar_cupom)
+            total_lotes += 1
+            if usou_fallback:
+                lotes_com_fallback += 1
 
             for oferta, frase in zip(lote, frases_do_lote):
                 link = oferta.get("offerLink", "")
@@ -890,6 +967,13 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         st.session_state.resultados = resultados_gerados  
         st.session_state.diagnostico = diagnostico_por_termo
         status_text.success(f"Concluído! {len(resultados_gerados)} ofertas geradas de um total de {total_bruto_acumulado} produtos analisados na Shopee.")  
+        if total_lotes > 0 and lotes_com_fallback > 0:
+            st.warning(
+                f"⚠️ {lotes_com_fallback} de {total_lotes} lotes de frases usaram o texto de reserva (fallback) "
+                f"em vez do Gemini — isso normalmente acontece quando a cota gratuita da API do Gemini é excedida. "
+                f"Se as frases vierem repetitivas, essa é a causa mais provável: espere um pouco e tente de novo, "
+                f"ou reduza a quantidade de ofertas por busca."
+            )
 
 if st.session_state.get("diagnostico"):
     with st.expander("🔍 Ver detalhamento por termo de busca (diagnóstico)"):
