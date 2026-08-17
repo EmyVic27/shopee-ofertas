@@ -6,6 +6,7 @@ import re
 import os  
 import requests  
 from datetime import datetime  
+import concurrent.futures
 import urllib.parse  
 import streamlit as st  
 from google import genai  
@@ -486,27 +487,38 @@ def _config_do_tom(estilo_prompt: str) -> dict:
     return TONS_CONFIG.get(estilo_prompt, TONS_CONFIG["Amiga / Achadinho (padrão, caloroso e natural)"])
 
 
-def _chamar_gemini_com_retry(gemini_client, mod: str, prompt: str, tentativas: int = 2, json_mode: bool = True):
+def _chamar_gemini_com_retry(gemini_client, mod: str, prompt: str, tentativas: int = 2, json_mode: bool = True, timeout_segundos: int = 20):
     """Tenta chamar o mesmo modelo mais de uma vez antes de desistir —
     evita cair no fallback genérico só porque bateu um limite momentâneo
-    de requisições (comum na cota gratuita do Gemini)."""
+    de requisições (comum na cota gratuita do Gemini).
+
+    IMPORTANTE: o SDK do Gemini (google-genai) tem um bug conhecido onde a
+    chamada pode travar pra sempre sem erro nenhum (issues #1876, #1893, #911
+    no repositório oficial). Por isso NÃO confiamos no timeout interno do
+    SDK — forçamos um limite de tempo por fora, numa thread separada, que
+    sempre libera o app mesmo se a chamada travar de verdade."""
     ultimo_erro = None
     config = {"temperature": 1.25}
     if json_mode:
         config["response_mime_type"] = "application/json"
+
     for tentativa in range(tentativas):
-        try:
-            return gemini_client.models.generate_content(
-                model=mod,
-                contents=prompt,
-                config=config,
-            ), None
-        except Exception as e:
-            ultimo_erro = str(e)
-            if "429" in ultimo_erro or "quota" in ultimo_erro.lower() or "rate" in ultimo_erro.lower():
-                time.sleep(1.5 * (tentativa + 1))  # espera crescente antes de tentar de novo
-                continue
-            break  # erro que não é de limite de requisição, não adianta tentar de novo no mesmo modelo
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                gemini_client.models.generate_content,
+                model=mod, contents=prompt, config=config,
+            )
+            try:
+                return future.result(timeout=timeout_segundos), None
+            except concurrent.futures.TimeoutError:
+                ultimo_erro = f"timeout: sem resposta em {timeout_segundos}s"
+                continue  # tenta de novo (pode ser instabilidade pontual)
+            except Exception as e:
+                ultimo_erro = str(e)
+                if "429" in ultimo_erro or "quota" in ultimo_erro.lower() or "rate" in ultimo_erro.lower():
+                    time.sleep(1.5 * (tentativa + 1))
+                    continue
+                break  # erro que não é de limite/timeout, não adianta tentar de novo
     return None, ultimo_erro
 
 
@@ -646,7 +658,7 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
     modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]  
     
     for mod in modelos:  
-        response, erro = _chamar_gemini_com_retry(gemini_client, mod, prompt, json_mode=False)
+        response, erro = _chamar_gemini_com_retry(gemini_client, mod, prompt, tentativas=1, json_mode=False, timeout_segundos=12)
         if response is None or not response.text:
             continue
         res = response.text.strip().replace("\n", " ").replace('"', '')  
