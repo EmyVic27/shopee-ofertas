@@ -10,6 +10,8 @@ import concurrent.futures
 import urllib.parse  
 import streamlit as st  
 from google import genai  
+from PIL import Image
+from io import BytesIO
 
 # Configuração da página no Streamlit  
 st.set_page_config(  
@@ -147,28 +149,228 @@ CATEGORIAS_MAP = {
 
 # ============== POOL DIVERSICADO DE SEGURANÇA (SEM NOME DE PRODUTO) ==============  
 
-POOL_FALLBACK_FRASES = [  
-    "Amiga, corre que isso não vai durar muito! 🏃‍♀️💨",  
-    "Gente, socorro, achei um achadinho bom demais pra deixar passar! 😱",  
-    "Óoo lindeza, e olha o valor disso! 😍",  
-    "Para tudo, isso aqui é achado e vai esgotar rápido! ⚡",  
-    "Amiga, isso tá quase de graça, olha só! 🤑",  
-    "Separei isso especialmente pra você! 💛",  
-    "Corre, corre, que isso não vai durar nem 5 minutos! 🏃‍♀️💨",  
-    "Achei e já vim correndo te contar antes que suba o preço! 😍",  
-    "Amiga, larga tudo e aproveita esse achadinho de hoje! 👀",  
-    "Gente, preço bom desse jeito não dura nada! ⏳",  
-    "Amiga, essa dica é de ouro pra quem ama economizar! ✨",  
-    "Aqui é chance rara, garante já! 🍀",  
-    "Amiga, você não tem noção do tanto que vale a pena! 🎁",  
-    "Gente, esse preço ficou um absurdo de barato! 💣",  
-    "Amiga, essa dica vale cada segundo, aproveita antes que esgote! 💕",  
-    "Isso aqui tá voando da prateleira, pega o seu rápido! 🛒",  
-    "Amiga, hoje é dia de sorte com esse preço! 🌟",  
-    "Gente, eu juro que fiquei de boca aberta com esse valor! 😮",  
-    "Amiga, corre que fica ainda mais em conta! 🎟️",  
-    "Isso aqui é hit garantido, separado com todo carinho! 🌸"  
-]  
+POOL_FALLBACK_POR_TOM = {
+    "Amiga / Achadinho (padrão, caloroso e natural)": [
+        "Amiga, separei isso especialmente pra você! 💛",
+        "Óoo lindeza, e olha o valor disso! 😍",
+        "Achei e já vim correndo te contar! 😍",
+        "Amiga, você não tem noção do tanto que vale a pena! 🎁",
+        "Isso aqui é hit garantido, separado com todo carinho! 🌸",
+        "Amiga, hoje é dia de sorte com esse preço! 🌟",
+        "Gente, fiquei apaixonada assim que vi! 🥰",
+        "Amiga, isso me lembrou de você na hora! 💕",
+        "Achado bom desses eu preciso compartilhar! ✨",
+        "Amiga, esse aqui ficou lindo, olha só! 🌷",
+        "Gente, adorei e já quis te mostrar! 💛",
+        "Amiga, isso tem cara de mimo, olha aí! 🎀",
+        "Achei um docinho de achado hoje! 🍯",
+        "Amiga, esse aqui é tipo presente pra você mesma! 🎁",
+        "Gente, quis compartilhar antes de mais nada! 😊",
+        "Amiga, olha que gracinha eu encontrei! 🌼",
+        "Isso aqui é tipo mimo de sexta-feira! 🥰",
+        "Amiga, fiquei encantada com esse achado! 💫",
+        "Gente, separei com todo cuidado pra vocês! 💛",
+        "Amiga, esse é daqueles que a gente guarda o link! 🔖",
+        "Que fofura esse achado, olha aí! 🩷",
+        "Amiga, adoraria ganhar isso de presente! 🎀",
+        "Gente, esse combina com tanta coisa! ✨",
+        "Amiga, achei bonitinho e útil ao mesmo tempo! 🌟",
+        "Isso aqui é tipo mimo que a gente merece! 💕",
+        "Amiga, olha só que achado gostoso! 🍃",
+        "Gente, esse tipo de coisa eu amo compartilhar! 😊",
+        "Amiga, achei com carinho pensando em você! 💛",
+        "Isso ficou uma graça, vem ver! 🌸",
+        "Amiga, esse é tipo mimo do dia! 🎁",
+    ],
+    "Conselho de Amiga (recomendação pessoal)": [
+        "Amiga, eu compraria sem pensar duas vezes! 🙌",
+        "Confia em mim nessa, vale muito a pena! 🙏",
+        "Amiga, testei o conceito e recomendo de olhos fechados! 👀",
+        "Se fosse pra indicar algo hoje, seria isso! 💛",
+        "Amiga, esse é o tipo que a gente indica com prazer! ✨",
+        "Olha, essa eu recomendo com toda certeza! 💯",
+        "Amiga, esse aqui merece estar na sua lista! 📝",
+        "Recomendo de coração, é bom pra caramba! 💕",
+        "Amiga, isso resolve um probleminha chato do dia a dia! 🙌",
+        "Vale o investimento, confia! 💰",
+        "Amiga, esse tipo de coisa eu sempre indico! 🌟",
+        "Testado e aprovado por mim, pode confiar! ✅",
+        "Amiga, quem me conhece sabe que eu só indico o que vale! 🙌",
+        "Se fosse minha, eu já teria comprado! 😄",
+        "Amiga, esse tipo de achado não decepciona! 💯",
+        "Confia, eu não indicaria se não valesse! 🙏",
+        "Amiga, esse aqui passou no meu teste de qualidade! ✅",
+        "Recomendo com o coração tranquilo! 💛",
+        "Amiga, dessa vez eu realmente aprovei! 👍",
+        "Se eu fosse escolher um pra indicar, era esse! 🌟",
+        "Amiga, esse tipo de coisa é rara de achar boa assim! 💎",
+        "Sinceramente, esse merece sua atenção! 🙌",
+        "Amiga, confia na minha experiência nessa! 💬",
+        "Esse eu recomendaria pra minha própria família! 👨‍👩‍👧",
+        "Amiga, é desse tipo de indicação que eu gosto de dar! 💛",
+        "Recomendo tranquila, já vi funcionar bem! ✅",
+        "Amiga, esse aqui ganhou meu selo de aprovação! 🏅",
+        "Confia, eu prezo demais indicar coisa boa! 🙏",
+        "Amiga, esse tipo eu levaria pra casa sem dúvida! 🏠",
+        "Recomendo com toda sinceridade! 💯",
+    ],
+    "Urgência / Imediatismo (aja agora)": [
+        "Corre, corre, que isso não vai durar nem 5 minutos! 🏃‍♀️💨",
+        "Amiga, corre que isso não vai durar muito! 🏃‍♀️💨",
+        "Isso aqui tá voando da prateleira, pega o seu rápido! 🛒",
+        "Para tudo, isso aqui vai esgotar rápido! ⚡",
+        "Gente, preço bom desse jeito não dura nada! ⏳",
+        "Amiga, larga tudo e corre antes que acabe! 👀",
+        "Últimas unidades, corre lá! 🔥",
+        "Amiga, isso some rapidinho, se apressa! 💨",
+        "Corre que a fila já começou! 🏃‍♀️",
+        "Amiga, não deixa pra depois, some rápido! ⏰",
+        "Gente, achei e já tá sumindo, corre! 😱",
+        "Amiga, é agora ou nunca, corre lá! ⚡",
+        "Corre antes que outra pessoa leve o seu! 🏃‍♀️",
+        "Amiga, agora é a hora certa, não deixa passar! ⏱️",
+        "Gente, tá esgotando na minha frente! 😳",
+        "Amiga, decide rápido que some em instantes! 💨",
+        "Não da tempo de pensar muito, corre! 🏃‍♀️",
+        "Amiga, é questão de minutos até sumir! ⏳",
+        "Corre que o estoque tá bem curto! 📦",
+        "Amiga, garante agora ou perde a chance! 🔥",
+        "Gente, tá acabando bem rápido esse aqui! ⚡",
+        "Amiga, não vacila, corre logo! 🏃‍♀️💨",
+        "Isso não espera, corre e garante o seu! ⏱️",
+        "Amiga, tá quase no fim do estoque! 📉",
+        "Corre que a demanda tá alta agora! 🔥",
+        "Amiga, essa é rápida, decide já! ⚡",
+        "Gente, corre que o link some rapidinho! 🏃‍♀️",
+        "Amiga, agora é o momento certo, corre! ⏰",
+        "Última chamada, corre antes que feche! 🚨",
+        "Amiga, tá voando literalmente, corre! 🛒",
+    ],
+    "Persuasiva / Gatilhos Mentais": [
+        "Gente, esse preço ficou um absurdo de barato! 💣",
+        "Amiga, essa dica é de ouro pra quem ama economizar! ✨",
+        "Aqui é chance rara, garante já! 🍀",
+        "Amiga, você vai se arrepender se deixar passar! 😮",
+        "Todo mundo tá comprando isso agora, olha só! 👀",
+        "Amiga, poucas pessoas sabem desse achado ainda! 🤫",
+        "Gente, esse é literalmente o queridinho do momento! ⭐",
+        "Amiga, quem tem, recomenda; quem não tem, quer! 🙌",
+        "Isso aqui é sucesso garantido, olha o motivo! 💛",
+        "Amiga, um achado desses não aparece toda hora! 💎",
+        "Gente, a procura por isso só cresce! 📈",
+        "Amiga, isso vai valer muito a sua atenção agora! 🎯",
+        "Gente, esse é o segredo que pouca gente conta! 🤐",
+        "Amiga, esse tipo de coisa vira tendência rápido! 📊",
+        "Poucos sabem, mas esse aqui é excelente! 🔑",
+        "Amiga, esse é o tipo que todo mundo pergunta onde comprou! 🗣️",
+        "Gente, isso já virou o queridinho das mães! 👑",
+        "Amiga, você vai querer contar pra todo mundo depois! 📣",
+        "Isso é tipo aqueles achados que a gente guarda segredo! 🤫",
+        "Amiga, esse aqui é motivo de orgulho de comprar bem! 🏆",
+        "Gente, essa é a prova de que vale pesquisar antes! 🔍",
+        "Amiga, esse tipo de escolha inteligente compensa! 🧠",
+        "Isso aqui separa quem sabe comprar de quem não sabe! 💪",
+        "Amiga, essa é a dica que vira referência! 📌",
+        "Gente, esse achado é dos que a gente não esquece! 🧡",
+        "Amiga, tô guardando esse print pra sempre! 📸",
+        "Isso é o tipo de coisa que todo mundo elogia depois! 👏",
+        "Amiga, essa escolha certamente vale o clique! ✅",
+        "Gente, poucos vão perceber esse achado a tempo! ⏳",
+        "Amiga, essa é rara e vale muito a atenção! 💎",
+    ],
+    "Festa Infantil & Maternidade (dica de amiga)": [
+        "Amiga, isso vai facilitar muito a organização da festa! 🎈",
+        "Mãe pra mãe: esse aqui salva o dia da festa! 🙌",
+        "Amiga, prático assim, você vai adorar pra sua ocasião! 💛",
+        "Isso resolve rapidinho um detalhe da festa! 🎀",
+        "Amiga, todo item que facilita a rotina é bem-vindo! 🌟",
+        "Gente, esse tipo de coisa que ajuda demais no dia a dia! 👶",
+        "Amiga, é um mimo que toda mãe organizada precisa! 🎁",
+        "Achado prático pra quem tá sempre correndo com os pequenos! 🏃‍♀️",
+        "Amiga, isso facilita demais a vida de quem organiza tudo! 🗂️",
+        "Mãe experiente sabe o valor de um achado assim! 👩‍👧",
+        "Amiga, isso poupa tempo na correria da festa! ⏱️",
+        "Gente, esse tipo de item some rápido do carrinho das mães! 🛒",
+        "Amiga, todo detalhe conta na hora de organizar! ✅",
+        "Isso é tipo mão na roda pra quem organiza festa! 🙌",
+        "Amiga, um item assim faz toda diferença no resultado! 🎉",
+        "Gente, praticidade desse nível toda mãe aprova! 👍",
+        "Amiga, isso ajuda a deixar tudo mais bonito e organizado! 🌸",
+        "Toda mãe organizada tem um desses na lista! 📋",
+        "Amiga, isso resolve e ainda fica lindo! 🎈",
+        "Gente, esse tipo de praticidade vale muito! 💛",
+    ],
+    "Oportunidade imperdível (foco em economia)": [
+        "Gente, esse preço ficou um absurdo de barato! 💣",
+        "Amiga, você não tem noção do tanto que vale a pena! 🎁",
+        "Isso aqui é economia de verdade, olha o valor! 💰",
+        "Amiga, o custo-benefício desse aqui é excelente! ✅",
+        "Vale cada centavo, olha só quanto sai! 💵",
+        "Amiga, economia boa começa com escolhas assim! 📉",
+        "Gente, o bolso agradece com esse preço! 🙌",
+        "Amiga, dá pra economizar bastante com esse aqui! 💛",
+        "Isso é tipo economia inteligente na prática! 🧠",
+        "Amiga, esse tipo de preço facilita o orçamento! 📊",
+        "Gente, poupar assim é sempre bem-vindo! 💰",
+        "Amiga, esse preço rende bastante economia no fim do mês! 📅",
+        "Vale muito quando você compara com o valor de mercado! ⚖️",
+        "Amiga, esse tipo de achado ajuda o bolso e ainda é bom! 👍",
+        "Gente, comprar assim é ser esperta com o dinheiro! 💡",
+        "Amiga, o retorno vale muito mais que o preço pago! 📈",
+        "Isso ajuda a fechar as contas com folga! 💵",
+        "Amiga, economizar assim é vitória no orçamento! 🏆",
+        "Gente, esse preço faz toda diferença no mês! 📆",
+        "Amiga, poupar bem é sempre motivo de comemorar! 🎉",
+    ],
+    "Emocionada / Reação de surpresa com o preço": [
+        "Gente, eu juro que fiquei de boca aberta com esse valor! 😮",
+        "Amiga, não acreditei quando vi o preço! 😱",
+        "Gente, tive que conferir duas vezes esse valor! 😳",
+        "Amiga, fiquei chocada (no bom sentido) com isso! 🤯",
+        "Não é possível esse preço, olha só! 😲",
+        "Amiga, quase caí da cadeira com esse valor! 😅",
+        "Gente, que surpresa boa foi essa! 🥹",
+        "Amiga, eu ri sozinha de tão bom que ficou! 😂",
+        "Gente, isso me pegou de surpresa mesmo! 😳",
+        "Amiga, tive que mostrar pra alguém na hora! 📲",
+        "Não consegui acreditar de primeira, juro! 😮",
+        "Amiga, esse preço me deixou sem palavras! 🤐",
+        "Gente, foi um susto bom quando eu vi! 😱",
+        "Amiga, fiquei emocionada com esse achado! 🥲",
+        "Isso superou totalmente minha expectativa! 😍",
+        "Amiga, tive que respirar fundo com essa surpresa! 😅",
+        "Gente, não tava esperando um preço desses! 😳",
+        "Amiga, foi surpresa atrás de surpresa hoje! 🎉",
+        "Confesso que fiquei besta com esse valor! 😂",
+        "Amiga, isso mexeu com meu emocional (no bom sentido)! 🥹",
+    ],
+    "Direta e objetiva (sem enrolação)": [
+        "Boa oportunidade, vale a pena conferir. 👍",
+        "Preço competitivo, aproveite enquanto está assim. ✅",
+        "Recomendo dar uma olhada nesse aqui. 🔍",
+        "Custo-benefício bom, vale o clique. 📌",
+        "Achado direto ao ponto: vale a pena. 💛",
+        "Simples assim: bom preço, boa escolha. ✔️",
+        "Sem enrolação: esse aqui compensa. 👌",
+        "Direto: preço bom, confira. 📋",
+        "Achado válido, sem exageros. ✅",
+        "Boa escolha pelo preço apresentado. 💰",
+        "Vale a conferida, sem dúvida. 👀",
+        "Preço justo, indicação direta. 📌",
+        "Objetivamente: compensa dar uma olhada. 🔎",
+        "Achado prático e sem enrolação. ✔️",
+        "Preço bom, decisão simples. 💛",
+        "Direto ao ponto: vale o investimento. 💵",
+        "Sem rodeios: esse aqui é uma boa pedida. 👍",
+        "Achado que fala por si só. 📊",
+        "Custo-benefício direto e sem enrolação. ✅",
+        "Recomendação objetiva: dá uma olhada. 🔍",
+    ],
+}
+
+# pool geral (usado só se o tom não bater com nenhuma chave acima)
+POOL_FALLBACK_FRASES = [f for lista in POOL_FALLBACK_POR_TOM.values() for f in lista]
+
 
 # ============== FUNÇÕES DE API E AUXILIARES ==============  
 
@@ -586,10 +788,12 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     """
 
     modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    erros_coletados = []
 
     for mod in modelos:
         response, erro = _chamar_gemini_com_retry(gemini_client, mod, prompt)
         if response is None or not response.text:
+            erros_coletados.append(f"[{mod}] {erro or 'resposta vazia'}")
             continue
         try:
             texto = response.text.strip()
@@ -597,8 +801,10 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
             dados = json.loads(texto)
             frases = dados.get("frases", [])
             if len(frases) >= len(ofertas_lote):
-                return [f.strip() for f in frases[:len(ofertas_lote)]], False
-        except Exception:
+                return [f.strip() for f in frases[:len(ofertas_lote)]], False, None
+            erros_coletados.append(f"[{mod}] JSON veio com {len(frases)} frases, esperava {len(ofertas_lote)}")
+        except Exception as e:
+            erros_coletados.append(f"[{mod}] falha ao interpretar JSON: {e} | resposta bruta: {response.text[:200]}")
             continue
 
     # Se o lote falhar (JSON quebrado, todos os modelos indisponíveis etc.),
@@ -607,7 +813,63 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
     for oferta in ofertas_lote:
         frase = gerar_frase_gemini(gemini_client, oferta, estilo_prompt, frases_recentes + resultado, campanha_texto, mencionar_cupom)
         resultado.append(frase)
-    return resultado, True
+    return resultado, True, " | ".join(erros_coletados)
+
+
+# ============== GERAÇÃO DE IMAGEM PROFISSIONAL DO PRODUTO ==============
+
+MODELOS_IMAGEM = ["gemini-3.1-flash-image", "gemini-3.1-flash-image-preview", "gemini-2.5-flash-image"]
+
+
+def gerar_foto_profissional(gemini_client, url_imagem_original: str, timeout_segundos: int = 25):
+    """Baixa a foto original do produto (a mesma que vem da Shopee) e pede
+    pro Gemini recriar como uma foto de produto realista e apresentável —
+    fundo limpo, boa iluminação, nada de estilo cartum/exagero, mantendo o
+    produto real (não inventa características que não existem na foto).
+
+    Retorna (bytes_da_imagem_png, erro). Se der erro, bytes_da_imagem_png
+    vem None e erro tem o motivo."""
+    try:
+        resp_download = requests.get(url_imagem_original, timeout=15)
+        resp_download.raise_for_status()
+        imagem_original = Image.open(BytesIO(resp_download.content))
+    except Exception as e:
+        return None, f"Não consegui baixar a foto original: {e}"
+
+    prompt = (
+        "Recrie esta foto de produto como uma foto de produto profissional para "
+        "e-commerce: fundo limpo e neutro (branco ou levemente cinza), boa "
+        "iluminação de estúdio, foco nítido no produto. "
+        "IMPORTANTE: mantenha o produto EXATAMENTE como é na imagem original — "
+        "mesma cor, formato e características reais. NÃO invente detalhes que "
+        "não existem, NÃO estilize como desenho/cartum/ilustração, NÃO exagere "
+        "nem adicione elementos fictícios. O resultado deve parecer uma foto "
+        "real tirada por um fotógrafo profissional de produtos, não uma arte "
+        "gerada por IA de forma óbvia."
+    )
+
+    for mod in MODELOS_IMAGEM:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                gemini_client.models.generate_content,
+                model=mod,
+                contents=[prompt, imagem_original],
+            )
+            try:
+                response = future.result(timeout=timeout_segundos)
+            except concurrent.futures.TimeoutError:
+                continue
+            except Exception:
+                continue
+
+        try:
+            for part in response.candidates[0].content.parts:
+                if part.inline_data is not None:
+                    return part.inline_data.data, None
+        except Exception:
+            continue
+
+    return None, "Não foi possível gerar a imagem em nenhum dos modelos disponíveis (pode ser cota da API ou modelo indisponível)."
 
 
 def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recentes: list, campanha_texto: str = "", mencionar_cupom: bool = False) -> str:  
@@ -665,15 +927,14 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
         if len(res) > 5 and not res.lower().startswith("gente, olha") and res not in frases_recentes:  
             return res  
 
-    # Fallback: garante que não repete nem no pool estático, e evita
-    # linguagem de correria/urgência se o tom escolhido não pedir isso
-    tom_calmo = "amiga" in estilo_prompt.lower() or "maternidade" in estilo_prompt.lower() or "economia" in estilo_prompt.lower()
-    palavras_urgencia = ("corre", "voando", "esgot", "última", "acabando")
-    pool_filtrado = POOL_FALLBACK_FRASES
-    if tom_calmo:
-        pool_filtrado = [f for f in POOL_FALLBACK_FRASES if not any(p in f.lower() for p in palavras_urgencia)]
-    opcoes_livres = [f for f in (pool_filtrado or POOL_FALLBACK_FRASES) if f not in frases_recentes]  
-    return random.choice(opcoes_livres or pool_filtrado or POOL_FALLBACK_FRASES)  
+    # Fallback: usa o pool específico do TOM escolhido (bem maior agora),
+    # evitando repetir frases já usadas nesta rodada
+    pool_do_tom = POOL_FALLBACK_POR_TOM.get(estilo_prompt, POOL_FALLBACK_FRASES)
+    opcoes_livres = [f for f in pool_do_tom if f not in frases_recentes]
+    if not opcoes_livres:
+        # esgotou o pool desse tom nesta rodada — usa o pool geral como reforço
+        opcoes_livres = [f for f in POOL_FALLBACK_FRASES if f not in frases_recentes]
+    return random.choice(opcoes_livres or pool_do_tom or POOL_FALLBACK_FRASES)
 
 # ============== INTERFACE STREAMLIT ==============  
 
@@ -700,6 +961,25 @@ def _valor_padrao(nome_secret: str) -> str:
 app_id = st.sidebar.text_input("Shopee APP_ID", value=_valor_padrao("SHOPEE_APP_ID"))
 app_secret = st.sidebar.text_input("Shopee APP_SECRET", value=_valor_padrao("SHOPEE_APP_SECRET"), type="password")
 gemini_key = st.sidebar.text_input("Gemini API Key", value=_valor_padrao("GEMINI_API_KEY"), type="password")
+
+if st.sidebar.button("🧪 Testar conexão com o Gemini"):
+    if not gemini_key:
+        st.sidebar.error("Preencha a Gemini API Key primeiro.")
+    else:
+        with st.sidebar.status("Testando..."):
+            try:
+                cliente_teste = genai.Client(api_key=gemini_key)
+                resp, erro = _chamar_gemini_com_retry(
+                    cliente_teste, "gemini-2.5-flash",
+                    "Responda só a palavra: ok",
+                    tentativas=1, json_mode=False, timeout_segundos=15
+                )
+                if resp and resp.text:
+                    st.sidebar.success(f"✅ Funcionando! Resposta: {resp.text.strip()[:50]}")
+                else:
+                    st.sidebar.error(f"❌ Falhou: {erro}")
+            except Exception as e:
+                st.sidebar.error(f"❌ Erro ao criar o cliente: {e}")
 
 st.sidebar.markdown("---")  
 st.sidebar.header("⚙️ Modo de Pesquisa e Categorias")  
@@ -919,12 +1199,15 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         idx_global = 0
         lotes_com_fallback = 0
         total_lotes = 0
+        erros_gemini_coletados = []
         for inicio in range(0, total_boas, tamanho_lote_gemini):
             lote = todas_ofertas_filtradas[inicio:inicio + tamanho_lote_gemini]
-            frases_do_lote, usou_fallback = gerar_frases_lote_gemini(gemini_client, lote, estilo_prompt, novas_frases, campanha_texto, mencionar_cupom)
+            frases_do_lote, usou_fallback, erro_detalhado = gerar_frases_lote_gemini(gemini_client, lote, estilo_prompt, novas_frases, campanha_texto, mencionar_cupom)
             total_lotes += 1
             if usou_fallback:
                 lotes_com_fallback += 1
+                if erro_detalhado:
+                    erros_gemini_coletados.append(erro_detalhado)
 
             for oferta, frase in zip(lote, frases_do_lote):
                 link = oferta.get("offerLink", "")
@@ -982,10 +1265,12 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         if total_lotes > 0 and lotes_com_fallback > 0:
             st.warning(
                 f"⚠️ {lotes_com_fallback} de {total_lotes} lotes de frases usaram o texto de reserva (fallback) "
-                f"em vez do Gemini — isso normalmente acontece quando a cota gratuita da API do Gemini é excedida. "
-                f"Se as frases vierem repetitivas, essa é a causa mais provável: espere um pouco e tente de novo, "
-                f"ou reduza a quantidade de ofertas por busca."
+                f"em vez do Gemini."
             )
+            if erros_gemini_coletados:
+                with st.expander("🔴 Ver o erro real retornado pelo Gemini (clique aqui)"):
+                    for i, err in enumerate(set(erros_gemini_coletados), 1):
+                        st.code(err, language=None)
 
 if st.session_state.get("diagnostico"):
     with st.expander("🔍 Ver detalhamento por termo de busca (diagnóstico)"):
@@ -1067,6 +1352,30 @@ if st.session_state.resultados:
                     st.write("")  
                     st.write("")  
                     st.link_button("📲 Enviar Esta Oferta", item["whatsapp_url"], use_container_width=True)  
+
+                chave_img = f"img_gerada_{item['id']}"
+                col_gerar, col_prev = st.columns([1, 1])
+                with col_gerar:
+                    if imagem and st.button("🎨 Gerar foto profissional", key=f"btn_img_{item['id']}", use_container_width=True):
+                        with st.spinner("Recriando a foto do produto..."):
+                            cliente_img = genai.Client(api_key=gemini_key)
+                            img_bytes, erro_img = gerar_foto_profissional(cliente_img, imagem)
+                            if img_bytes:
+                                st.session_state[chave_img] = img_bytes
+                                st.rerun()
+                            else:
+                                st.error(f"Não deu certo: {erro_img}")
+                with col_prev:
+                    if chave_img in st.session_state:
+                        st.image(st.session_state[chave_img], width=160, caption="Foto recriada")
+                        st.download_button(
+                            "📥 Baixar foto",
+                            data=st.session_state[chave_img],
+                            file_name=f"produto_{item['id']}.png",
+                            mime="image/png",
+                            key=f"dl_img_{item['id']}",
+                            use_container_width=True
+                        )
                     
             st.markdown("---")  
 
