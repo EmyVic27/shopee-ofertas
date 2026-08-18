@@ -787,7 +787,7 @@ def gerar_frases_lote_gemini(gemini_client, ofertas_lote: list, estilo_prompt: s
        Sem markdown, sem explicação, sem texto fora do JSON.
     """
 
-    modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    modelos = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
     erros_coletados = []
 
     for mod in modelos:
@@ -917,7 +917,7 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
     7. Responda APENAS com a frase final, sem aspas, sem explicações e sem introduções.  
     """  
 
-    modelos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]  
+    modelos = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"]  
     
     for mod in modelos:  
         response, erro = _chamar_gemini_com_retry(gemini_client, mod, prompt, tentativas=1, json_mode=False, timeout_segundos=12)
@@ -970,7 +970,7 @@ if st.sidebar.button("🧪 Testar conexão com o Gemini"):
             try:
                 cliente_teste = genai.Client(api_key=gemini_key)
                 resp, erro = _chamar_gemini_com_retry(
-                    cliente_teste, "gemini-2.5-flash",
+                    cliente_teste, "gemini-3.6-flash",
                     "Responda só a palavra: ok",
                     tentativas=1, json_mode=False, timeout_segundos=15
                 )
@@ -1005,10 +1005,10 @@ if modo_busca in ["🏷️ Usar Categorias da Shopee", "🔀 Combinar Categorias
         key="k_categorias"
     )  
 
-if modo_busca in ["✍️ Digitar Palavras-Chave Específicas", "🔀 Combinar Categorias + Palavras-Chave"]:  
+if modo_busca in ["✍️ Digitar Palavras-Chave Específicas", "🔀 Combinar Categorias + Palavras-Chave", "🌐 Busca Livre Geral (Sem restrição)"]:  
     keywords_digitadas = st.sidebar.text_input(  
-        "Digite as Palavras-chave (separadas por vírgula):",  
-        help="Digite exatamente como você costuma pesquisar no aplicativo da Shopee.",
+        "Digite as Palavras-chave (separadas por vírgula) — opcional nesse modo:",  
+        help="Digite exatamente como você costuma pesquisar no aplicativo da Shopee. Se deixar em branco, busca termos genéricos de ofertas em geral.",
         key="k_keywords"
     )  
 
@@ -1135,12 +1135,12 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
             for cat in categorias_selecionadas:  
                 buscas.extend(CATEGORIAS_MAP.get(cat, []))  
                 
-        if modo_busca in ["✍️ Digitar Palavras-Chave Específicas", "🔀 Combinar Categorias + Palavras-Chave"]:  
+        if modo_busca in ["✍️ Digitar Palavras-Chave Específicas", "🔀 Combinar Categorias + Palavras-Chave", "🌐 Busca Livre Geral (Sem restrição)"]:  
             if keywords_digitadas.strip():  
                 kw_lista = [k.strip() for k in re.split(r"[,\n]", keywords_digitadas) if k.strip()]  
                 buscas.extend(kw_lista)  
                 
-        if modo_busca == "🌐 Busca Livre Geral (Sem restrição)" or not buscas:  
+        if not buscas:  
             buscas = ["promoção", "desconto", "oferta", "achadinhos", "utilidades", "presente"]  
             
         buscas = list(dict.fromkeys(buscas))  
