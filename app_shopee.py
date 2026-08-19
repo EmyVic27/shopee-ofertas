@@ -147,6 +147,27 @@ CATEGORIAS_MAP = {
     ]  
 }  
 
+# ============== SANITIZAÇÃO DE SESSÃO SALVA (evita erro ao expandir opções) ==============
+# Se o app foi atualizado (ex: mais categorias adicionadas) depois que uma
+# sessão já tinha sido salva em disco, valores antigos que não existem mais
+# nas opções atuais quebram os multiselects do Streamlit. Isso limpa esses
+# valores "órfãos" automaticamente antes de renderizar qualquer widget.
+_OPCOES_TIPOS_LOJA_VALIDAS = [
+    "Todas as Lojas (Recomendado - Maior volume)",
+    "Lojas Oficiais (Shopee Oficial)",
+    "Lojas Indicadas (Shopee Indicado)"
+]
+if "k_categorias" in st.session_state:
+    if isinstance(st.session_state["k_categorias"], list):
+        st.session_state["k_categorias"] = [c for c in st.session_state["k_categorias"] if c in CATEGORIAS_MAP]
+    else:
+        st.session_state["k_categorias"] = []
+if "k_tipos_loja" in st.session_state:
+    if isinstance(st.session_state["k_tipos_loja"], list):
+        st.session_state["k_tipos_loja"] = [t for t in st.session_state["k_tipos_loja"] if t in _OPCOES_TIPOS_LOJA_VALIDAS]
+    else:
+        st.session_state["k_tipos_loja"] = ["Todas as Lojas (Recomendado - Maior volume)"]
+
 # ============== POOL DIVERSICADO DE SEGURANÇA (SEM NOME DE PRODUTO) ==============  
 
 POOL_FALLBACK_POR_TOM = {
