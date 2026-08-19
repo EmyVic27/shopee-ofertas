@@ -876,6 +876,28 @@ def gerar_foto_profissional(gemini_client, url_imagem_original: str, timeout_seg
     return None, "Não foi possível gerar a imagem em nenhum dos modelos disponíveis (pode ser cota da API ou modelo indisponível)."
 
 
+SUFIXOS_CUPOM = [
+    " Usa o cupom! 🎟️",
+    " Ainda dá pra colocar cupom! 🎟️",
+    " Some com cupom aplicado! 🎟️",
+    " Não esquece do cupom! 🎟️",
+]
+
+
+def _ajustar_frase_fallback(frase: str, mencionar_cupom: bool, campanha_texto: str) -> str:
+    """O banco de reserva (fallback) é fixo e não sabe nada sobre cupom/campanha
+    — essa função adiciona isso por cima quando necessário, pra respeitar o
+    que foi marcado na barra lateral mesmo quando o Gemini não está disponível."""
+    resultado = frase
+    if campanha_texto.strip() and campanha_texto.lower() not in resultado.lower():
+        # extrai só a parte da data/nome da campanha (ex: "campanha do dia 9.9" -> "9.9")
+        data_curta = campanha_texto.replace("campanha do dia ", "").strip()
+        resultado = f"{resultado} Aproveita a {data_curta}! 🗓️"
+    if mencionar_cupom and "cupom" not in resultado.lower():
+        resultado = resultado + random.choice(SUFIXOS_CUPOM)
+    return resultado
+
+
 def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recentes: list, campanha_texto: str = "", mencionar_cupom: bool = False) -> str:  
     preco = oferta.get("price") or oferta.get("priceMin") or ""  
     desconto = oferta.get("priceDiscountRate", "")  
@@ -938,7 +960,8 @@ def gerar_frase_gemini(gemini_client, oferta, estilo_prompt: str, frases_recente
     if not opcoes_livres:
         # esgotou o pool desse tom nesta rodada — usa o pool geral como reforço
         opcoes_livres = [f for f in POOL_FALLBACK_FRASES if f not in frases_recentes]
-    return random.choice(opcoes_livres or pool_do_tom or POOL_FALLBACK_FRASES)
+    frase_escolhida = random.choice(opcoes_livres or pool_do_tom or POOL_FALLBACK_FRASES)
+    return _ajustar_frase_fallback(frase_escolhida, mencionar_cupom, campanha_texto)
 
 # ============== INTERFACE STREAMLIT ==============  
 
