@@ -50,7 +50,7 @@ DEFAULTS_SESSAO = {
     "k_campanha_ativa": False,
     "k_dia_duplo": "",
     "k_mencionar_cupom": False,
-    "k_tamanho_lote": 10,
+    "k_tamanho_lote": 25,
     "resultados": [],
 }
 
@@ -717,6 +717,10 @@ def _chamar_gemini_com_retry(gemini_client, mod: str, prompt: str, tentativas: i
                 continue  # tenta de novo (pode ser instabilidade pontual)
             except Exception as e:
                 ultimo_erro = str(e)
+                if "PerDay" in ultimo_erro or "GenerateRequestsPerDayPerProjectPerModel" in ultimo_erro:
+                    # Cota DIÁRIA esgotada — esperar alguns segundos não resolve nada,
+                    # só reseta depois de 24h. Desiste na hora pra não perder tempo.
+                    break
                 if "429" in ultimo_erro or "quota" in ultimo_erro.lower() or "rate" in ultimo_erro.lower():
                     time.sleep(1.5 * (tentativa + 1))
                     continue
@@ -1034,9 +1038,14 @@ opcao_ordem = st.sidebar.selectbox(
 
 sort_type_map = {  
     "Relevância (Igual à pesquisa do site da Shopee)": 1,  
-    "Mais Vendidos / Populares": 3,  
-    "Maior Taxa de Comissão": 2  
+    "Mais Vendidos / Populares": 1,  
+    "Maior Taxa de Comissão": 1  
 }  
+# NOTA: sortType=2/3 da Shopee não é documentado oficialmente e mostrou
+# resultados errados na prática (retornava os mais CAROS em vez dos mais
+# vendidos). Por isso sempre buscamos por relevância (valor confiável) e
+# fazemos a ordenação de "mais vendidos"/"maior comissão" nós mesmos, em
+# cima dos dados reais que a Shopee devolve (sales / commissionRate).
 sort_type_escolhido = sort_type_map[opcao_ordem]  
 
 qtd_por_keyword = st.sidebar.number_input(  
@@ -1115,7 +1124,7 @@ mencionar_cupom = st.sidebar.checkbox("Mencionar cupom nas frases?", key="k_menc
 
 tamanho_lote_gemini = st.sidebar.slider(
     "Ofertas por chamada ao Gemini (lote)",
-    min_value=5, max_value=25,
+    min_value=5, max_value=50,
     help="Números maiores = menos chamadas à API = mais rápido e mais barato. Se notar frases de baixa qualidade, diminua.",
     key="k_tamanho_lote"
 )
@@ -1186,6 +1195,14 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
             })
             progresso.progress((index + 1) / total_buscas)  
         
+        # Ordenação de verdade, feita por nós com dados reais (não pelo
+        # sortType da Shopee, que não é confiável nem documentado)
+        if opcao_ordem == "Mais Vendidos / Populares":  
+            todas_ofertas_filtradas.sort(key=lambda o: int(o.get("sales") or 0), reverse=True)  
+        elif opcao_ordem == "Maior Taxa de Comissão":  
+            todas_ofertas_filtradas.sort(key=lambda o: float(o.get("commissionRate") or 0), reverse=True)  
+        # "Relevância" mantém a ordem que a própria Shopee já devolveu  
+
         status_text.text("Gerando frases personalizadas com o Gemini AI...")  
         
         resultados_gerados = []  
@@ -1263,10 +1280,21 @@ if st.button("🚀 Buscar Novas Ofertas", type="primary", use_container_width=Tr
         st.session_state.diagnostico = diagnostico_por_termo
         status_text.success(f"Concluído! {len(resultados_gerados)} ofertas geradas de um total de {total_bruto_acumulado} produtos analisados na Shopee.")  
         if total_lotes > 0 and lotes_com_fallback > 0:
-            st.warning(
-                f"⚠️ {lotes_com_fallback} de {total_lotes} lotes de frases usaram o texto de reserva (fallback) "
-                f"em vez do Gemini."
-            )
+            texto_erros_junto = " ".join(erros_gemini_coletados)
+            cota_diaria_esgotada = "PerDay" in texto_erros_junto or "GenerateRequestsPerDayPerProjectPerModel" in texto_erros_junto
+            if cota_diaria_esgotada:
+                st.error(
+                    "🚫 Cota GRATUITA diária do Gemini esgotada (limite de 20 requisições/dia no plano free). "
+                    "Isso só reseta depois de 24h. Enquanto isso, o app usa o banco de frases de reserva normalmente. "
+                    "Pra evitar isso no futuro: aumente o 'Ofertas por chamada ao Gemini (lote)' na barra lateral "
+                    "(quanto maior o lote, menos requisições você gasta pro mesmo volume de ofertas), evite clicar "
+                    "várias vezes em 'Testar conexão', ou ative faturamento no Google AI Studio para um limite bem maior."
+                )
+            else:
+                st.warning(
+                    f"⚠️ {lotes_com_fallback} de {total_lotes} lotes de frases usaram o texto de reserva (fallback) "
+                    f"em vez do Gemini."
+                )
             if erros_gemini_coletados:
                 with st.expander("🔴 Ver o erro real retornado pelo Gemini (clique aqui)"):
                     for i, err in enumerate(set(erros_gemini_coletados), 1):
@@ -1432,7 +1460,14 @@ if st.session_state.resultados:
 
     with tab_exportar:  
         if selecionados:  
-            texto_bloco_total = "\n\n---\n\n".join([r["texto_final"] for r in selecionados])  
+            total_sel = len(selecionados)
+            blocos_com_identificacao = []
+            for i, r in enumerate(selecionados, 1):
+                nome_produto = r["oferta"].get("productName", "Produto sem nome")
+                cabecalho = f"[{i}/{total_sel}] {nome_produto}"
+                blocos_com_identificacao.append(f"{cabecalho}\n{r['texto_final']}")
+            texto_bloco_total = "\n\n---\n\n".join(blocos_com_identificacao)
+            st.caption("O arquivo exportado agora mostra o número e o nome do produto acima de cada mensagem, pra você identificar rapidinho do que se trata sem precisar abrir o link.")
             st.download_button(  
                 label="📥 Baixar Ofertas Selecionadas (.txt)",  
                 data=texto_bloco_total,  
